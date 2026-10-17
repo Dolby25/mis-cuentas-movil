@@ -3,46 +3,51 @@ import sqlite3
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
-import re  # Módulo nativo para validación por expresiones regulares
+import re
+import random
+import string
 
-st.set_page_config(page_title="Control Financiero Vinculado", page_icon="💰", layout="centered")
+st.set_page_config(page_title="Control Financiero Compartido", page_icon="💰", layout="centered")
 
-# RUTA DE ARCHIVOS DE LA APLICACIÓN
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
-# Usamos la versión v2 para resolver el conflicto de tablas antiguas en la nube
-RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v2.db")
+# Cambiamos a la versión v3 para reestructurar las tablas con soporte de códigos de invitación
+RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v3.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
 
 def es_correo_valido(correo):
-    """Verifica si la estructura corresponde a un correo real."""
     patron = r'^[\w\.-]+@[\w\.-]+\.\w+$'
     return re.match(patron, correo) is not None
+
+def generar_codigo_hogar():
+    """Genera un código único de 6 caracteres para invitar a otros."""
+    return "HOGAR-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
 
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    # Tabla de credenciales de usuario
+    # Tabla de usuarios ahora incluye a qué hogar pertenecen
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             identificador TEXT PRIMARY KEY,
-            clave TEXT NOT NULL
+            clave TEXT NOT NULL,
+            hogar_id TEXT NOT NULL
         )
     """)
-    # Tabla de saldos modificada para incluir al usuario propietario
+    # Las cuentas operativas ahora se guardan por hogar_id
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
-            usuario_id TEXT,
+            hogar_id TEXT,
             item TEXT,
             monto REAL NOT NULL,
             tipo TEXT NOT NULL,
-            PRIMARY KEY (usuario_id, item)
+            PRIMARY KEY (hogar_id, item)
         )
     """)
-    # Tabla histórica modificada para incluir al usuario propietario
+    # El histórico se archiva por hogar_id
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            usuario_id TEXT NOT NULL,
+            hogar_id TEXT NOT NULL,
             mes_ano TEXT NOT NULL,
             item TEXT NOT NULL,
             monto REAL NOT NULL,
@@ -55,9 +60,10 @@ def inicializar_db():
 def registrar_usuario_db(identificador, clave):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
+    nuevo_hogar = generar_codigo_hogar()
     try:
-        cursor.execute("INSERT INTO usuarios (identificador, clave) VALUES (?, ?)", (identificador, clave))
-        cursor.execute("INSERT INTO mes_activo (usuario_id, item, monto, tipo) VALUES (?, 'Ingresos Principales', 0.0, 'Ingreso')", (identificador,))
+        cursor.execute("INSERT INTO usuarios (identificador, clave, hogar_id) VALUES (?, ?, ?)", (identificador, clave, nuevo_hogar))
+        cursor.execute("INSERT INTO mes_activo (hogar_id, item, monto, tipo) VALUES (?, 'Ingresos Principales', 0.0, 'Ingreso')", (nuevo_hogar,))
         conn.commit()
         exito = True
     except sqlite3.IntegrityError:
@@ -68,25 +74,42 @@ def registrar_usuario_db(identificador, clave):
 def verificar_usuario_db(identificador, clave):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("SELECT clave FROM usuarios WHERE identificador = ?", (identificador,))
+    cursor.execute("SELECT clave, hogar_id FROM usuarios WHERE identificador = ?", (identificador,))
     resultado = cursor.fetchone()
     conn.close()
     if resultado and resultado[0] == clave:
-        return True
-    return False
+        return resultado[1]  # Retorna el hogar_id si la clave es correcta
+    return None
 
-def actualizar_monto_db(usuario_id, item, nuevo_monto):
+def unirse_a_hogar_db(usuario_id, codigo_invitacion):
+    """Vincula a un usuario a un hogar existente mediante código."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("UPDATE mes_activo SET monto = ? WHERE usuario_id = ? AND item = ?", (nuevo_monto, usuario_id, item))
+    # Verificar si el código de hogar de destino realmente existe
+    cursor.execute("SELECT DISTINCT hogar_id FROM usuarios WHERE hogar_id = ?", (codigo_invitacion,))
+    existe = cursor.fetchone()
+    if existe:
+        # Actualizar el hogar del usuario actual
+        cursor.execute("UPDATE usuarios SET hogar_id = ? WHERE identificador = ?", (codigo_invitacion, usuario_id))
+        conn.commit()
+        exito = True
+    else:
+        exito = False
+    conn.close()
+    return exito
+
+def actualizar_monto_db(hogar_id, item, nuevo_monto):
+    conn = sqlite3.connect(RUTA_DB)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE mes_activo SET monto = ? WHERE hogar_id = ? AND item = ?", (nuevo_monto, hogar_id, item))
     conn.commit()
     conn.close()
 
-def insertar_nuevo_item_db(usuario_id, item, tipo="Gasto"):
+def insertar_nuevo_item_db(hogar_id, item, tipo="Gasto"):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO mes_activo (usuario_id, item, monto, tipo) VALUES (?, ?, 0.0, ?)", (usuario_id, item, tipo))
+        cursor.execute("INSERT INTO mes_activo (hogar_id, item, monto, tipo) VALUES (?, ?, 0.0, ?)", (hogar_id, item, tipo))
         conn.commit()
         exito = True
     except sqlite3.IntegrityError:
@@ -94,34 +117,34 @@ def insertar_nuevo_item_db(usuario_id, item, tipo="Gasto"):
     conn.close()
     return exito
 
-def eliminar_item_db(usuario_id, item, tipo):
+def eliminar_item_db(hogar_id, item, tipo):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM mes_activo WHERE usuario_id = ? AND item = ? AND tipo = ?", (usuario_id, item, tipo))
+    cursor.execute("DELETE FROM mes_activo WHERE hogar_id = ? AND item = ? AND tipo = ?", (hogar_id, item, tipo))
     conn.commit()
     conn.close()
 
-def obtener_todos_los_saldos(usuario_id):
+def obtener_todos_los_saldos(hogar_id):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("SELECT item, monto, tipo FROM mes_activo WHERE usuario_id = ?", (usuario_id,))
+    cursor.execute("SELECT item, monto, tipo FROM mes_activo WHERE hogar_id = ?", (hogar_id,))
     datos = cursor.fetchall()
     conn.close()
     return datos
 
-def guardar_mes_en_historico(usuario_id, mes_ano, datos_saldos):
+def guardar_mes_en_historico(hogar_id, mes_ano, datos_saldos):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM historico WHERE usuario_id = ? AND mes_ano = ?", (usuario_id, mes_ano))
+    cursor.execute("DELETE FROM historico WHERE hogar_id = ? AND mes_ano = ?", (hogar_id, mes_ano))
     for item, monto, tipo in datos_saldos:
-        cursor.execute("INSERT INTO historico (usuario_id, mes_ano, item, monto, tipo) VALUES (?, ?, ?, ?, ?)", (usuario_id, mes_ano, item, monto, tipo))
+        cursor.execute("INSERT INTO historico (hogar_id, mes_ano, item, monto, tipo) VALUES (?, ?, ?, ?, ?)", (hogar_id, mes_ano, item, monto, tipo))
     conn.commit()
     conn.close()
-    exportar_datos_a_excel(usuario_id)
+    exportar_datos_a_excel(hogar_id)
 
-def exportar_datos_a_excel(usuario_id):
+def exportar_datos_a_excel(hogar_id):
     conn = sqlite3.connect(RUTA_DB)
-    df_historico = pd.read_sql_query("SELECT mes_ano, item, monto, tipo FROM historico WHERE usuario_id = ?", conn, params=(usuario_id,))
+    df_historico = pd.read_sql_query("SELECT mes_ano, item, monto, tipo FROM historico WHERE hogar_id = ?", conn, params=(hogar_id,))
     conn.close()
     if df_historico.empty:
         return
@@ -138,11 +161,11 @@ def exportar_datos_a_excel(usuario_id):
         df_desglose.to_excel(writer, sheet_name="Historial Desglosado", index=False)
         df_comparativa.to_excel(writer, sheet_name="Comparativa de Gastos", index=False)
 
-def obtener_meses_historicos(usuario_id):
+def obtener_meses_historicos(hogar_id):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE usuario_id = ? ORDER BY id DESC", (usuario_id,))
-    meses = [fila[0] for fila in cursor.fetchall()]
+    cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE hogar_id = ? ORDER BY id DESC", (hogar_id,))
+    meses = [fila for fila in cursor.fetchall()]
     conn.close()
     return meses
 
@@ -153,12 +176,14 @@ def formatear_clp(monto):
 
 inicializar_db()
 # --- INTERFAZ VISUAL ---
-st.title("📱 Sistema Financiero Personalizado")
+st.title("📱 Sistema Financiero Familiar Compartido")
 
 if "sesion_activa" not in st.session_state:
     st.session_state["sesion_activa"] = False
 if "cuenta_usuario" not in st.session_state:
     st.session_state["cuenta_usuario"] = ""
+if "hogar_id" not in st.session_state:
+    st.session_state["hogar_id"] = ""
 
 if not st.session_state["sesion_activa"]:
     pestana_login, pestana_registro = st.tabs(["🔒 Iniciar Sesión", "📝 Crear Cuenta"])
@@ -171,9 +196,11 @@ if not st.session_state["sesion_activa"]:
         if st.button("🔓 Entrar", use_container_width=True):
             user_clean = usuario_input.strip().lower()
             if user_clean and clave_input.strip():
-                if verificar_usuario_db(user_clean, clave_input.strip()):
+                datos_login = verificar_usuario_db(user_clean, clave_input.strip())
+                if datos_login:
                     st.session_state["sesion_activa"] = True
                     st.session_state["cuenta_usuario"] = user_clean
+                    st.session_state["hogar_id"] = datos_login[1]
                     st.toast("Sesión iniciada con éxito.", icon="✅")
                     st.rerun()
                 else:
@@ -189,7 +216,6 @@ if not st.session_state["sesion_activa"]:
         if st.button("🚀 Crear y Vincular Cuenta", use_container_width=True):
             user_reg_clean = nuevo_usuario.strip().lower()
             if user_reg_clean and nueva_clave.strip():
-                # Validación estricta de correo real antes de guardar en SQLite
                 if es_correo_valido(user_reg_clean):
                     if registrar_usuario_db(user_reg_clean, nueva_clave.strip()):
                         st.success("¡Cuenta vinculada con éxito! Ya puedes iniciar sesión desde la primera pestaña.")
@@ -202,7 +228,30 @@ if not st.session_state["sesion_activa"]:
     st.stop()
 
 usuario_logueado = st.session_state["cuenta_usuario"]
-st.info(f"🟢 Cuenta activa vinculada: **{usuario_logueado}**")
+hogar_actual = st.session_state["hogar_id"]
+
+st.info(f"👤 Cuenta activa: **{usuario_logueado}**")
+
+# SECCIÓN DE INVITACIÓN DE HOGAR
+with st.sidebar:
+    st.markdown("### 👥 Cuentas Compartidas")
+    st.markdown(f"Tu código de hogar actual es:")
+    st.code(hogar_actual, language="text")
+    st.markdown("Comparte este código con la persona que quieres invitar.")
+    
+    st.markdown("---")
+    st.markdown("#### ¿Quieres unirte a otro hogar?")
+    codigo_ingresado = st.text_input("Ingresa el código de invitación:", placeholder="Ej: HOGAR-A1B2").strip().upper()
+    if st.button("🔗 Enlazar Cuentas", use_container_width=True):
+        if codigo_ingresado:
+            if unirse_a_hogar_db(usuario_logueado, codigo_ingresado):
+                st.session_state["hogar_id"] = codigo_ingresado
+                st.success("¡Te has unido al nuevo hogar con éxito!")
+                st.rerun()
+            else:
+                st.error("Código de hogar inválido o inexistente.")
+        else:
+            st.warning("Por favor escribe un código.")
 st.subheader("📅 Periodo Contable Activo")
 col_mes, col_ano = st.columns(2)
 with col_mes:
@@ -220,7 +269,7 @@ if "nuevo_ingreso_tmp" not in st.session_state:
 def ejecutar_alta_ingreso():
     texto_alta = st.session_state["campo_alta_ingreso"].strip()
     if texto_alta:
-        if insertar_nuevo_item_db(usuario_logueado, texto_alta, "Ingreso"):
+        if insertar_nuevo_item_db(hogar_actual, texto_alta, "Ingreso"):
             st.session_state["nuevo_ingreso_tmp"] = ""
             st.toast(f"Ingreso '{texto_alta}' añadido.", icon="➕")
         else:
@@ -230,10 +279,9 @@ with st.expander("👥 Añadir casilla para sueldos compartidos"):
     st.text_input("Nombre de la nueva fuente de ingreso (Ej: Sueldo Milena):", value=st.session_state["nuevo_ingreso_tmp"], key="campo_alta_ingreso", on_change=ejecutar_alta_ingreso)
     st.button("➕ Confirmar Nuevo Ingreso", use_container_width=True)
 
-saldos_db = obtener_todos_los_saldos(usuario_logueado)
+saldos_db = obtener_todos_los_saldos(hogar_actual)
 
 total_ingresos = 0.0
-# Filtrado preciso inspeccionando la estructura correcta de la tupla (elemento en la posición 2)
 ingresos_existentes = [row for row in saldos_db if row[2] == "Ingreso"]
 
 for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
@@ -245,11 +293,11 @@ for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
     with col_ing_del:
         st.markdown("<div style='padding-top: 28px;'></div>", unsafe_allow_html=True)
         if st.button("🗑️", key=f"del_ing_{item_nom}", help=f"Eliminar {item_nom}"):
-            eliminar_item_db(usuario_logueado, item_nom, "Ingreso")
+            eliminar_item_db(hogar_actual, item_nom, "Ingreso")
             st.rerun()
             
     if ingreso_num != valor_monto:
-        actualizar_monto_db(usuario_logueado, item_nom, float(ingreso_num))
+        actualizar_monto_db(hogar_actual, item_nom, float(ingreso_num))
         st.rerun()
         
     total_ingresos += ingreso_num
@@ -263,7 +311,7 @@ if "gasto_texto_tmp" not in st.session_state:
 def ejecutar_alta_gasto():
     texto_alta = st.session_state["campo_alta_gasto"].strip()
     if texto_alta:
-        if insertar_nuevo_item_db(usuario_logueado, texto_alta, "Gasto"):
+        if insertar_nuevo_item_db(hogar_actual, texto_alta, "Gasto"):
             st.session_state["gasto_texto_tmp"] = ""
             st.toast(f"'{texto_alta}' agregado.", icon="➕")
         else:
@@ -272,7 +320,7 @@ def ejecutar_alta_gasto():
 def ejecutar_baja_gasto():
     target_baja = st.session_state["selector_baja_gasto"]
     if target_baja != "Seleccione...":
-        eliminar_item_db(usuario_logueado, target_baja, "Gasto")
+        eliminar_item_db(hogar_actual, target_baja, "Gasto")
         st.toast(f"'{target_baja}' eliminado.", icon="🗑️")
 
 col_add, col_del = st.columns(2)
@@ -282,8 +330,8 @@ with col_add:
     st.button("➕ Añadir Gasto", use_container_width=True)
 
 with col_del:
-    saldos_db = obtener_todos_los_saldos(usuario_logueado)
-    gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
+    saldos_db = obtener_todos_los_saldos(hogar_actual)
+    gastos_existentes = [row for row in saldos_db if row[2] == "Gasto"]
     st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
     st.button("🗑️ Eliminar Gasto", use_container_width=True)
 
@@ -296,7 +344,7 @@ for item, valor, tipo in saldos_db:
         gasto_num = st.number_input(f"Monto {item} (CLP $):", value=int(valor), min_value=0, step=1000, key=f"gasto_input_{item}")
         
         if gasto_num != valor:
-            actualizar_monto_db(usuario_logueado, item, float(gasto_num))
+            actualizar_monto_db(hogar_actual, item, float(gasto_num))
             st.rerun()
             
         total_gastos += gasto_num
@@ -333,10 +381,10 @@ st.pyplot(fig)
 st.markdown("---")
 if st.button("🗄️ Archivar Periodo y Actualizar Excel", use_container_width=True):
     if total_ingresos + total_gastos > 0:
-        guardar_mes_en_historico(usuario_logueado, periodo_completo, obtener_todos_los_saldos(usuario_logueado))
+        guardar_mes_en_historico(hogar_actual, periodo_completo, obtener_todos_los_saldos(hogar_actual))
         conn = sqlite3.connect(RUTA_DB)
         cursor = conn.cursor()
-        cursor.execute("UPDATE mes_activo SET monto = 0.0 WHERE usuario_id = ?", (usuario_logueado,))
+        cursor.execute("UPDATE mes_activo SET monto = 0.0 WHERE hogar_id = ?", (hogar_actual,))
         conn.commit()
         conn.close()
         st.success(f"¡Periodo contable {periodo_completo} indexado con éxito!")
@@ -345,12 +393,12 @@ if st.button("🗄️ Archivar Periodo y Actualizar Excel", use_container_width=
         st.warning("No hay transacciones para archivar.")
 
 st.subheader("📁 Periodos Consolidados")
-meses_hist = obtener_meses_historicos(usuario_logueado)
+meses_hist = obtener_meses_historicos(hogar_actual)
 mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m for m in meses_hist])
 
 if mes_hist_sel != "Seleccione...":
     conn = sqlite3.connect(RUTA_DB)
-    df_resumen = pd.read_sql_query("SELECT item as 'Concepto', monto as 'Monto' FROM historico WHERE usuario_id = ? AND mes_ano = ?", conn, params=(usuario_logueado, mes_hist_sel))
+    df_resumen = pd.read_sql_query("SELECT item as 'Concepto', monto as 'Monto' FROM historico WHERE hogar_id = ? AND mes_ano = ?", conn, params=(hogar_actual, mes_hist_sel))
     conn.close()
     df_resumen['Monto'] = df_resumen['Monto'].apply(formatear_clp)
     st.dataframe(df_resumen, use_container_width=True)
@@ -359,7 +407,9 @@ st.markdown("---")
 if st.button("🔒 Cerrar Sesión Segura", use_container_width=True):
     st.session_state["sesion_activa"] = False
     st.session_state["cuenta_usuario"] = ""
+    st.session_state["hogar_id"] = ""
     st.rerun()
+
 
 
 
