@@ -13,8 +13,6 @@ RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    # Se eliminó la PRIMARY KEY estricta en 'item' para que permita múltiples flujos si es necesario, 
-    # o se maneja mediante lógica de integridad de nombres únicos por tipo.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             item TEXT PRIMARY KEY,
@@ -49,20 +47,6 @@ def insertar_nuevo_item_db(item, tipo="Gasto"):
     cursor = conn.cursor()
     try:
         cursor.execute("INSERT INTO mes_activo (item, monto, tipo) VALUES (?, 0.0, ?)", (item, tipo))
-        conn.commit()
-        exito = True
-    except sqlite3.IntegrityError:
-        exito = False
-    conn.close()
-    return exito
-
-def cambiar_nombre_ingreso_db(viejo_nombre, nuevo_nombre):
-    if viejo_nombre == nuevo_nombre:
-        return True
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    try:
-        cursor.execute("UPDATE mes_activo SET item = ? WHERE item = ? AND tipo = 'Ingreso'", (nuevo_nombre, viejo_nombre))
         conn.commit()
         exito = True
     except sqlite3.IntegrityError:
@@ -127,15 +111,6 @@ def formatear_clp(monto):
     formato_numero = f"${valor_absoluto:,}".replace(",", ".")
     return formato_numero if monto >= 0 else f"-{formato_numero}"
 
-def limpiar_y_convertir_monto(texto_monto):
-    texto_limpio = texto_monto.replace("$", "").replace(".", "").strip()
-    if not texto_limpio:
-        return 0.0
-    try:
-        return float(texto_limpio)
-    except ValueError:
-        return 0.0
-
 inicializar_db()
 st.title("📱 Control Financiero Móvil")
 
@@ -154,7 +129,6 @@ periodo_completo = f"{mes_sel} {ano_sel}"
 st.markdown("---")
 st.markdown("### 📥 Ingresos Consolidados")
 
-# Cargar estados para control de ingresos compartidos
 if "nuevo_ingreso_tmp" not in st.session_state:
     st.session_state["nuevo_ingreso_tmp"] = ""
 
@@ -167,23 +141,22 @@ def ejecutar_alta_ingreso():
         else:
             st.error("Este concepto de ingreso ya está registrado.")
 
-# Botón desplegable para añadir casillas de ingresos compartidos
 with st.expander("👥 Añadir casilla para sueldos compartidos"):
     st.text_input("Nombre de la nueva fuente de ingreso (Ej: Sueldo Milena):", value=st.session_state["nuevo_ingreso_tmp"], key="campo_alta_ingreso", on_change=ejecutar_alta_ingreso)
     st.button("➕ Confirmar Nuevo Ingreso", use_container_width=True)
 
 saldos_db = obtener_todos_los_saldos()
 
-# Procesar dinámicamente todas las casillas de tipo 'Ingreso'
 total_ingresos = 0.0
+# Corrección del filtro crítico de tuplas de SQLite
 ingresos_existentes = [row for row in saldos_db if row[2] == "Ingreso"]
 
 for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
-    col_ing_txt, col_ing_del = st.columns([5, 1])
+    col_ing_txt, col_ing_del = st.columns([0.85, 0.15])
     
     with col_ing_txt:
-        monto_inicial_formateado = f"{int(valor_monto):,}".replace(",", ".") if valor_monto > 0 else ""
-        ingreso_input_text = st.text_input(f"Monto {item_nom} (CLP $):", value=monto_inicial_formateado, key=f"ingreso_input_{item_nom}", placeholder="Ej: 1.500.000")
+        # Se cambia a number_input numérico para evitar errores de escritura con máscaras de texto
+        ingreso_num = st.number_input(f"Monto {item_nom} (CLP $):", value=int(valor_monto), min_value=0, step=1000, key=f"ingreso_input_{item_nom}")
     
     with col_ing_del:
         st.markdown("<div style='padding-top: 28px;'></div>", unsafe_allow_html=True)
@@ -191,17 +164,12 @@ for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
             eliminar_item_db(item_nom, "Ingreso")
             st.rerun()
             
-    ingreso_procesado = limpiar_y_convertir_monto(ingreso_input_text)
-    texto_formateado_ingreso = f"{int(ingreso_procesado):,}".replace(",", ".") if ingreso_procesado > 0 else ""
-    
-    if texto_formateado_ingreso != ingreso_input_text and ingreso_input_text != "":
-        actualizar_monto_db(item_nom, ingreso_procesado)
-        st.rerun()
-    elif ingreso_input_text == "" and valor_monto != 0.0:
-        actualizar_monto_db(item_nom, 0.0)
+    if ingreso_num != valor_monto:
+        actualizar_monto_db(item_nom, float(ingreso_num))
         st.rerun()
         
-    total_ingresos += ingreso_procesado
+    total_ingresos += ingreso_num
+
 st.markdown("---")
 st.markdown("### 💸 Controles Operativos de Gastos")
 
@@ -241,22 +209,15 @@ gastos_filtrados = {}
 
 for item, valor, tipo in saldos_db:
     if tipo == "Gasto":
-        valor_inicial_formateado = f"{int(valor):,}".replace(",", ".") if valor > 0 else ""
-        gasto_input_text = st.text_input(f"Monto {item} (CLP $):", value=valor_inicial_formateado, key=f"gasto_input_{item}", placeholder="Ej: 45.000")
+        gasto_num = st.number_input(f"Monto {item} (CLP $):", value=int(valor), min_value=0, step=1000, key=f"gasto_input_{item}")
         
-        gasto_procesado = limpiar_y_convertir_monto(gasto_input_text)
-        texto_formateado_gasto = f"{int(gasto_procesado):,}".replace(",", ".") if gasto_procesado > 0 else ""
-        
-        if texto_formateado_gasto != gasto_input_text and gasto_input_text != "":
-            actualizar_monto_db(item, gasto_procesado)
-            st.rerun()
-        elif gasto_input_text == "" and valor != 0.0:
-            actualizar_monto_db(item, 0.0)
+        if gasto_num != valor:
+            actualizar_monto_db(item, float(gasto_num))
             st.rerun()
             
-        total_gastos += gasto_procesado
-        if gasto_procesado > 0:
-            gastos_filtrados[item] = gasto_procesado
+        total_gastos += gasto_num
+        if gasto_num > 0:
+            gastos_filtrados[item] = gasto_num
 
 saldo_disponible = total_ingresos - total_gastos
 st.markdown("---")
@@ -267,7 +228,6 @@ st.metric("Balance Neto", formatear_clp(saldo_disponible))
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
 fig.patch.set_facecolor('#282C34')
-
 ax1.set_facecolor("#282C34")
 ax2.set_facecolor("#282C34")
 
@@ -310,6 +270,7 @@ if mes_hist_sel != "Seleccione...":
     conn.close()
     df_resumen['Monto'] = df_resumen['Monto'].apply(formatear_clp)
     st.dataframe(df_resumen, use_container_width=True)
+
 
 
 
