@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Administrador de finanzas", page_icon="💰", layout="centered")
 
-# CONFIGURACIÓN DE RUTAS EN EL DISPOSITIVO O SERVIDOR
+# CONFIGURACIÓN DE LAS RUTAS DE LA BASE DE DATOS Y EXCEL
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
 RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v5.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
@@ -268,7 +268,7 @@ if "pin_usuario" not in st.session_state:
 if "pin_desbloqueado" not in st.session_state:
     st.session_state["pin_desbloqueado"] = False
 
-# BLOQUE 1: INICIO DE SESIÓN COMPLETO POR DISPOSITIVO (PRIMERA VEZ)
+# PASO 1: INICIO DE SESIÓN COMPLETO POR DISPOSITIVO (PRIMERA VEZ)
 if not st.session_state["cuenta_usuario"]:
     st.title("📱 Administrador de finanzas")
     tab_log, tab_reg = st.tabs(["Iniciar Sesión", "Crear Cuenta"])
@@ -297,7 +297,7 @@ if not st.session_state["cuenta_usuario"]:
             else:
                 st.error("Ingresa un correo verdadero válido.")
     st.stop()
-# BLOQUE 2: DISPOSITIVO RECONOCIDO EXIGIENDO EL PIN DE ACCESO RÁPIDO
+# PASO 2: DISPOSITIVO RECONOCIDO EXIGIENDO EL PIN DE ACCESO RÁPIDO
 if st.session_state["pin_usuario"] and not st.session_state["pin_desbloqueado"]:
     st.title("📱 Administrador de finanzas")
     st.info(f"Sesión activa: **{st.session_state['cuenta_usuario']}**")
@@ -310,7 +310,7 @@ if st.session_state["pin_usuario"] and not st.session_state["pin_desbloqueado"]:
             st.error("PIN incorrecto. Inténtalo de nuevo.")
     st.stop()
 
-# BLOQUE 3: CONFIGURACIÓN OBLIGATORIA DEL PIN POR PRIMERA VEZ
+# PASO 3: CONFIGURACIÓN OBLIGATORIA DEL PIN POR PRIMERA VEZ
 if not st.session_state["pin_usuario"]:
     st.title("⚙️ Configuración Obligatoria del PIN")
     st.warning("Define un código PIN corto de 4 números para abrir tu aplicación en el día a día.")
@@ -334,7 +334,7 @@ es_propietario = st.session_state["es_propietario"]
 st.title("📱 Administrador de finanzas")
 st.info(f"🟢 Conectado como: **{usuario_logueado}**")
 
-# INTERRUPTOR DE MODO OCULTO TOTAL
+# INTERRUPTOR EXCLUSIVO DE MODO OCULTO TOTAL
 st.markdown("---")
 modo_oculto = st.toggle("👁️ Activar Modo Oculto (Censurar saldos y gráficos)", value=False)
 
@@ -391,7 +391,7 @@ with tab_metas:
         else:
             st.caption("Aún no tienen logros guardados. ¡Completen su primera meta de ahorro para ganar una medalla!")
     else:
-        st.caption("No hay metas configuradas en este hogar.")
+        st.caption("No hay metas configuradas in este hogar.")
 with tab_cuentas:
     col_mes, col_ano = st.columns(2)
     with col_mes:
@@ -453,7 +453,7 @@ with tab_cuentas:
     with col_add:
         st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
     with col_del:
-        gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
+        gastos_existentes = [row for row in saldos_db if row[2] == "Gasto"]
         st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
 
     st.markdown("#### Valores del Periodo")
@@ -480,19 +480,35 @@ with tab_cuentas:
     if modo_oculto:
         st.warning("🔒 Los gráficos analíticos están ocultos de forma temporal debido al Modo Oculto activo.")
     else:
+        # --- MEJORA GRÁFICA PREMIUM CON ENTORNO OSCURO ---
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
-        fig.patch.set_facecolor('#282C34')
-        ax1.set_facecolor("#282C34")
-        ax2.set_facecolor("#282C34")
-        barras = ax1.bar(["Ingresos", "Gastos"], [total_ingresos, total_gastos], color=["#4A90E2", "#E74C3C"], width=0.4)
-        ax1.set_title("Balance Financiero", color="#E1E4E6", fontsize=12, fontweight="bold")
+        fig.patch.set_facecolor('#0E1117')
+        ax1.set_facecolor("#0E1117")
+        ax2.set_facecolor("#0E1117")
+        
+        barras = ax1.bar(["Ingresos", "Gastos"], [total_ingresos, total_gastos], color=["#00C49F", "#FF8042"], width=0.4, edgecolor='none')
+        ax1.set_title("Balance Financiero", color="#E1E4E6", fontsize=12, fontweight="bold", pad=15)
         ax1.tick_params(colors="#A0A5AD", labelsize=10)
+        ax1.spines['top'].set_visible(False)
+        ax1.spines['right'].set_visible(False)
+        ax1.spines['left'].set_color('#31333F')
+        ax1.spines['bottom'].set_color('#31333F')
+        ax1.grid(axis='y', color='#262730', linestyle='--', linewidth=0.5)
+        ax1.set_axisbelow(True)
+        
         for bar in barras:
             yval = bar.get_height()
-            ax1.text(bar.get_x() + bar.get_width()/2, yval + 1, matrimonial_formatear_clp(yval), ha='center', va='bottom', color='#E1E4E6', fontsize=10, fontweight="bold")
+            ax1.text(bar.get_x() + bar.get_width()/2, yval + (total_ingresos * 0.02 if total_ingresos > 0 else 1), 
+                     matrimonial_formatear_clp(yval), ha='center', va='bottom', color='#E1E4E6', fontsize=10, fontweight="bold")
+        
         if gastos_filtrados:
-            ax2.pie(gastos_filtrados.values(), labels=gastos_filtrados.keys(), autopct='%1.1f%%', startangle=90, textprops=dict(color="#E1E4E6", fontsize=10), colors=['#4A90E2', '#357ABD', '#225E9B', '#1B4780', '#5C9CE6'])
-            ax2.set_title("Distribución de Egresos", color="#E1E4E6", fontsize=12, fontweight="bold")
+            wedges, texts = ax2.pie(gastos_filtrados.values(), wedgeprops=dict(width=0.4, edgecolor='#0E1117', linewidth=2), 
+                                    startangle=90, colors=['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'])
+            total_g = sum(gastos_filtrados.values())
+            etiquetas_leyenda = [f"{k} ({v/total_g*100:.1f}% - {matrimonial_formatear_clp(v)})" for k, v in gastos_filtrados.items()]
+            ax2.legend(wedges, etiquetas_leyenda, title="Conceptos de Egreso", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1),
+                       facecolor='#1E222A', edgecolor='#31333F', textprops=dict(color='#E1E4E6', fontsize=9))
+            ax2.set_title("Distribución de Egresos", color="#E1E4E6", fontsize=12, fontweight="bold", pad=15)
         else:
             ax2.text(0.5, 0.5, 'Sin transacciones de egreso', ha='center', va='center', color='#8A9099', fontsize=10)
         st.pyplot(fig)
@@ -544,6 +560,7 @@ st.markdown("---")
 if st.button("🔒 Bloquear Pantalla (Fijar PIN)", use_container_width=True):
     st.session_state["pin_desbloqueado"] = False
     st.rerun()
+
 
 
 
