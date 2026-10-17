@@ -12,7 +12,7 @@ st.set_page_config(page_title="Control Financiero Familiar", page_icon="💰", l
 
 # RUTA DE ARCHIVOS DE LA APLICACIÓN
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
-# Cambiamos a la versión v5 para incorporar las tablas de PIN y Metas con Logros
+# Versión v5 unificada para evitar conflictos de columnas antiguas en Streamlit Cloud
 RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v5.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
 
@@ -28,7 +28,7 @@ def generar_string_aleatorio():
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    # Tabla de usuarios incluye la columna para el PIN de 4 dígitos
+    # Tabla de usuarios con soporte para el PIN de 4 dígitos
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             identificador TEXT PRIMARY KEY,
@@ -45,6 +45,7 @@ def inicializar_db():
             codigo TEXT NOT NULL UNIQUE
         )
     """)
+    # Tabla de saldos indexada por el hogar compartido
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             hogar_id TEXT,
@@ -54,6 +55,7 @@ def inicializar_db():
             PRIMARY KEY (hogar_id, item)
         )
     """)
+    # Tabla histórica indexada por el hogar compartido
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,7 +66,7 @@ def inicializar_db():
             tipo TEXT NOT NULL DEFAULT 'Gasto'
         )
     """)
-    # Nueva tabla para las Metas de Ahorro y Logros del Hogar
+    # Tabla para las Metas de Ahorro y Logros del Hogar
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metas_ahorro (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,11 +97,13 @@ def registrar_usuario_db(identificador, clave):
     return exito
 
 def verificar_usuario_db(identificador, clave):
+    """Extrae y valida de forma segura todos los campos necesarios del perfil."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT clave, hogar_id, es_propietario, pin FROM usuarios WHERE identificador = ?", (identificador,))
     resultado = cursor.fetchone()
     conn.close()
+    
     if resultado and resultado[0] == clave:
         return {
             "hogar_id": resultado[1],
@@ -159,10 +163,20 @@ def insertar_meta_db(hogar_id, nombre, objetivo, plazo):
     conn.close()
 
 def obtener_metas_db(hogar_id):
+    """Usa cursores nativos para leer de forma segura las metas y logros en Streamlit Cloud."""
     conn = sqlite3.connect(RUTA_DB)
-    df = pd.read_sql_query("SELECT id, nombre, monto_objetivo, monto_actual, fecha_inicio, plazo_dias, completado FROM metas_ahorro WHERE hogar_id = ?", conn)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, nombre, monto_objetivo, monto_actual, fecha_inicio, plazo_dias, completado 
+        FROM metas_ahorro 
+        WHERE hogar_id = ?
+    """, (hogar_id,))
+    filas = cursor.fetchall()
     conn.close()
-    return df
+    
+    # Creamos un DataFrame de Pandas estructurado a mano de forma limpia
+    columnas = ['id', 'nombre', 'monto_objetivo', 'monto_actual', 'fecha_inicio', 'plazo_dias', 'completado']
+    return pd.DataFrame(filas, columns=columnas)
 
 def abonar_a_meta_db(meta_id, monto):
     conn = sqlite3.connect(RUTA_DB)
@@ -170,8 +184,10 @@ def abonar_a_meta_db(meta_id, monto):
     cursor.execute("SELECT monto_actual, monto_objetivo FROM metas_ahorro WHERE id = ?", (meta_id,))
     res = cursor.fetchone()
     if res:
-        nuevo_monto = res[0] + monto
-        completado = 1 if nuevo_monto >= res[1] else 0
+        monto_actual = res[0]
+        monto_objetivo = res[1]
+        nuevo_monto = monto_actual + monto
+        completado = 1 if nuevo_monto >= monto_objetivo else 0
         cursor.execute("UPDATE metas_ahorro SET monto_actual = ?, completado = ? WHERE id = ?", (nuevo_monto, completado, meta_id))
         conn.commit()
     conn.close()
@@ -243,7 +259,7 @@ def obtener_meses_historicos(hogar_id):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE hogar_id = ? ORDER BY id DESC", (hogar_id,))
-    meses = [fila for fila in cursor.fetchall()]
+    meses = [fila[0] for fila in cursor.fetchall()]
     conn.close()
     return meses
 
@@ -266,7 +282,7 @@ if "pin_usuario" not in st.session_state:
 if "pin_desbloqueado" not in st.session_state:
     st.session_state["pin_desbloqueado"] = False
 
-# Caso 1: No hay sesión de correo iniciada (Primera vez en el celular)
+# Caso 1: No hay sesión iniciada (Primera vez en el dispositivo)
 if not st.session_state["cuenta_usuario"]:
     st.title("🔒 Registro e Inicio de Sesión Inicial")
     tab_log, tab_reg = st.tabs(["Iniciar Sesión", "Crear Cuenta"])
@@ -298,10 +314,10 @@ if not st.session_state["cuenta_usuario"]:
                 st.error("Ingresa un correo verdadero válido.")
     st.stop()
 
-# Caso 2: El correo está conectado, pero exige el PIN rápido de 4 dígitos
+# Caso 2: El correo está guardado pero exige el bloqueo por PIN rápido de 4 dígitos
 if st.session_state["pin_usuario"] and not st.session_state["pin_desbloqueado"]:
     st.title("🔒 Acceso de Seguridad Rápido")
-    st.info(f"Sesión en curso: **{st.session_state['cuenta_usuario']}**")
+    st.info(f"Sesión activa: **{st.session_state['cuenta_usuario']}**")
     pin_ingresado = st.text_input("Introduce tu PIN numérico de 4 dígitos:", type="password", max_chars=4, placeholder="••••")
     if st.button("🔓 Desbloquear App", use_container_width=True):
         if pin_ingresado == st.session_state["pin_usuario"]:
@@ -311,10 +327,10 @@ if st.session_state["pin_usuario"] and not st.session_state["pin_desbloqueado"]:
             st.error("PIN incorrecto. Inténtalo de nuevo.")
     st.stop()
 
-# Caso 3: El usuario está conectado por correo pero aún no define su PIN inicial
+# Caso 3: Dispositivo conectado por correo pero aún no configura su PIN de 4 números
 if not st.session_state["pin_usuario"]:
     st.title("⚙️ Configuración Obligatoria del PIN")
-    st.warning("Define un código PIN corto de 4 números para abrir tu aplicación en el día a día sin escribir contraseñas.")
+    st.warning("Define un código PIN corto de 4 números para abrir tu aplicación en el día a día sin escribir contraseñas largas.")
     nuevo_pin_1 = st.text_input("Crea tu PIN rápido de 4 dígitos:", type="password", max_chars=4, placeholder="Ej: 1234")
     nuevo_pin_2 = st.text_input("Confirma tu PIN:", type="password", max_chars=4)
     if st.button("💾 Guardar PIN de Seguridad", use_container_width=True):
@@ -550,6 +566,7 @@ st.markdown("---")
 if st.button("🔒 Bloquear Pantalla (Fijar PIN)", use_container_width=True):
     st.session_state["pin_desbloqueado"] = False
     st.rerun()
+
 
 
 
