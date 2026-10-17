@@ -9,9 +9,12 @@ st.set_page_config(page_title="Control Financiero", page_icon="💰", layout="ce
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
 RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_dinamico.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
+
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
+    # Se eliminó la PRIMARY KEY estricta en 'item' para que permita múltiples flujos si es necesario, 
+    # o se maneja mediante lógica de integridad de nombres únicos por tipo.
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             item TEXT PRIMARY KEY,
@@ -52,6 +55,7 @@ def insertar_nuevo_item_db(item, tipo="Gasto"):
         exito = False
     conn.close()
     return exito
+
 def cambiar_nombre_ingreso_db(viejo_nombre, nuevo_nombre):
     if viejo_nombre == nuevo_nombre:
         return True
@@ -66,10 +70,10 @@ def cambiar_nombre_ingreso_db(viejo_nombre, nuevo_nombre):
     conn.close()
     return exito
 
-def eliminar_gasto_db(item):
+def eliminar_item_db(item, tipo):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM mes_activo WHERE item = ? AND tipo = 'Gasto'", (item,))
+    cursor.execute("DELETE FROM mes_activo WHERE item = ? AND tipo = ?", (item, tipo))
     conn.commit()
     conn.close()
 
@@ -131,8 +135,8 @@ def limpiar_y_convertir_monto(texto_monto):
         return float(texto_limpio)
     except ValueError:
         return 0.0
-inicializar_db()
 
+inicializar_db()
 st.title("📱 Control Financiero Móvil")
 
 st.subheader("👤 Bienvenido al sistema")
@@ -147,53 +151,76 @@ with col_ano:
     ano_sel = st.selectbox("Año:", ["2025", "2026", "2027", "2028"], index=1)
 periodo_completo = f"{mes_sel} {ano_sel}"
 
+st.markdown("---")
 st.markdown("### 📥 Ingresos Consolidados")
+
+# Cargar estados para control de ingresos compartidos
+if "nuevo_ingreso_tmp" not in st.session_state:
+    st.session_state["nuevo_ingreso_tmp"] = ""
+
+def ejecutar_alta_ingreso():
+    texto_alta = st.session_state["campo_alta_ingreso"].strip()
+    if texto_alta:
+        if insertar_nuevo_item_db(texto_alta, "Ingreso"):
+            st.session_state["nuevo_ingreso_tmp"] = ""
+            st.toast(f"Ingreso '{texto_alta}' añadido.", icon="➕")
+        else:
+            st.error("Este concepto de ingreso ya está registrado.")
+
+# Botón desplegable para añadir casillas de ingresos compartidos
+with st.expander("👥 Añadir casilla para sueldos compartidos"):
+    st.text_input("Nombre de la nueva fuente de ingreso (Ej: Sueldo Milena):", value=st.session_state["nuevo_ingreso_tmp"], key="campo_alta_ingreso", on_change=ejecutar_alta_ingreso)
+    st.button("➕ Confirmar Nuevo Ingreso", use_container_width=True)
+
 saldos_db = obtener_todos_los_saldos()
-nombre_ingreso_inicial = next((row for row in saldos_db if row[2] == "Ingreso"), "Ingresos Principales")
-monto_ingreso_inicial = next((row for row in saldos_db if row[2] == "Ingreso"), 0.0)
 
-nuevo_nombre_ingreso = st.text_input("Concepto de Ingreso:", value=nombre_ingreso_inicial)
-if nuevo_nombre_ingreso != nombre_ingreso_inicial and nuevo_nombre_ingreso.strip():
-    cambiar_nombre_ingreso_db(nombre_ingreso_inicial, nuevo_nombre_ingreso.strip())
-    st.rerun()
+# Procesar dinámicamente todas las casillas de tipo 'Ingreso'
+total_ingresos = 0.0
+ingresos_existentes = [row for row in saldos_db if row[2] == "Ingreso"]
 
-monto_inicial_formateado = f"{int(monto_ingreso_inicial):,}".replace(",", ".") if monto_ingreso_inicial > 0 else ""
-ingreso_input_text = st.text_input(f"Monto {nuevo_nombre_ingreso} (CLP $):", value=monto_inicial_formateado, placeholder="Ej: 1.500.000")
-
-ingreso_procesado = limpiar_y_convertir_monto(ingreso_input_text)
-texto_formateado_ingreso = f"{int(ingreso_procesado):,}".replace(",", ".") if ingreso_procesado > 0 else ""
-
-if texto_formateado_ingreso != ingreso_input_text and ingreso_input_text != "":
-    actualizar_monto_db(nuevo_nombre_ingreso, ingreso_procesado)
-    st.rerun()
-elif ingreso_input_text == "" and monto_ingreso_inicial != 0.0:
-    actualizar_monto_db(nuevo_nombre_ingreso, 0.0)
-    st.rerun()
-
-monto_ingreso = ingreso_procesado
+for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
+    col_ing_txt, col_ing_del = st.columns([5, 1])
+    
+    with col_ing_txt:
+        monto_inicial_formateado = f"{int(valor_monto):,}".replace(",", ".") if valor_monto > 0 else ""
+        ingreso_input_text = st.text_input(f"Monto {item_nom} (CLP $):", value=monto_inicial_formateado, key=f"ingreso_input_{item_nom}", placeholder="Ej: 1.500.000")
+    
+    with col_ing_del:
+        st.markdown("<div style='padding-top: 28px;'></div>", unsafe_allow_html=True)
+        if st.button("🗑️", key=f"del_ing_{item_nom}", help=f"Eliminar {item_nom}"):
+            eliminar_item_db(item_nom, "Ingreso")
+            st.rerun()
+            
+    ingreso_procesado = limpiar_y_convertir_monto(ingreso_input_text)
+    texto_formateado_ingreso = f"{int(ingreso_procesado):,}".replace(",", ".") if ingreso_procesado > 0 else ""
+    
+    if texto_formateado_ingreso != ingreso_input_text and ingreso_input_text != "":
+        actualizar_monto_db(item_nom, ingreso_procesado)
+        st.rerun()
+    elif ingreso_input_text == "" and valor_monto != 0.0:
+        actualizar_monto_db(item_nom, 0.0)
+        st.rerun()
+        
+    total_ingresos += ingreso_procesado
 st.markdown("---")
 st.markdown("### 💸 Controles Operativos de Gastos")
 
 if "gasto_texto_tmp" not in st.session_state:
     st.session_state["gasto_texto_tmp"] = ""
 
-# Funciones de ejecución inmediata antes de re-renderizar la pantalla
 def ejecutar_alta_gasto():
     texto_alta = st.session_state["campo_alta_gasto"].strip()
     if texto_alta:
-        if texto_alta != nuevo_nombre_ingreso:
-            if insertar_nuevo_item_db(texto_alta, "Gasto"):
-                st.session_state["gasto_texto_tmp"] = ""
-                st.toast(f"'{texto_alta}' agregado.", icon="➕")
-            else:
-                st.error("Este ítem de gasto ya se encuentra registrado.")
+        if insertar_nuevo_item_db(texto_alta, "Gasto"):
+            st.session_state["gasto_texto_tmp"] = ""
+            st.toast(f"'{texto_alta}' agregado.", icon="➕")
         else:
-            st.error("El nombre coincide con la casilla activa de ingresos.")
+            st.error("Este ítem de gasto ya se encuentra registrado.")
 
 def ejecutar_baja_gasto():
     target_baja = st.session_state["selector_baja_gasto"]
     if target_baja != "Seleccione...":
-        eliminar_gasto_db(target_baja)
+        eliminar_item_db(target_baja, "Gasto")
         st.toast(f"'{target_baja}' eliminado.", icon="🗑️")
 
 col_add, col_del = st.columns(2)
@@ -203,12 +230,12 @@ with col_add:
     st.button("➕ Añadir Gasto", use_container_width=True)
 
 with col_del:
+    saldos_db = obtener_todos_los_saldos()
     gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
     st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
     st.button("🗑️ Eliminar Gasto", use_container_width=True)
 
 st.markdown("#### Valores del Periodo")
-total_ingresos = monto_ingreso
 total_gastos = 0.0
 gastos_filtrados = {}
 
@@ -283,6 +310,7 @@ if mes_hist_sel != "Seleccione...":
     conn.close()
     df_resumen['Monto'] = df_resumen['Monto'].apply(formatear_clp)
     st.dataframe(df_resumen, use_container_width=True)
+
 
 
 
