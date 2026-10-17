@@ -3,6 +3,7 @@ import sqlite3
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import re
 import random
 import string
@@ -89,7 +90,6 @@ def registrar_usuario_db(identificador, clave):
     return exito
 
 def verificar_usuario_db(identificador, clave):
-    """Mapea con total exactitud los índices posicionales de la tupla de SQLite."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT clave, hogar_id, es_propietario, pin FROM usuarios WHERE identificador = ?", (identificador,))
@@ -118,7 +118,6 @@ def solicitar_nuevo_codigo_db(hogar_id):
     conn.commit()
     conn.close()
     return nuevo_codigo
-
 def obtener_codigo_activo_db(hogar_id):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -142,6 +141,7 @@ def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
         exito = False
     conn.close()
     return exito
+
 def insertar_meta_db(hogar_id, nombre, objetivo, plazo):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -152,7 +152,6 @@ def insertar_meta_db(hogar_id, nombre, objetivo, plazo):
     """, (hogar_id, nombre, objetivo, fecha_hoy, plazo))
     conn.commit()
     conn.close()
-
 def obtener_metas_db(hogar_id):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -174,6 +173,7 @@ def abonar_a_meta_db(meta_id, monto):
         cursor.execute("UPDATE metas_ahorro SET monto_actual = ?, completado = ? WHERE id = ?", (nuevo_monto, completado, meta_id))
         conn.commit()
     conn.close()
+
 def actualizar_monto_db(hogar_id, item, nuevo_monto):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -192,7 +192,6 @@ def insertar_nuevo_item_db(hogar_id, item, tipo="Gasto"):
         exito = False
     conn.close()
     return exito
-
 def eliminar_item_db(hogar_id, item, tipo):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -236,7 +235,6 @@ def exportar_datos_a_excel(hogar_id):
     with pd.ExcelWriter(RUTA_EXCEL, engine='openpyxl') as writer:
         df_desglose.to_excel(writer, sheet_name="Historial Desglosado", index=False)
         df_comparativa.to_excel(writer, sheet_name="Comparativa de Gastos", index=False)
-
 def obtener_meses_historicos(hogar_id):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -256,7 +254,8 @@ def ocultar_monto_clp(monto, modo_oculto_activo):
     return matrimonial_formatear_clp(monto)
 
 inicializar_db()
-# --- INICIALIZACIÓN DE VARIABLES EN MEMORIA (SESSION STATE) ---
+
+# --- ACCESO PERSISTENTE POR DISPOSITIVO MÓVIL ---
 if "cuenta_usuario" not in st.session_state:
     st.session_state["cuenta_usuario"] = ""
 if "hogar_id" not in st.session_state:
@@ -268,7 +267,6 @@ if "pin_usuario" not in st.session_state:
 if "pin_desbloqueado" not in st.session_state:
     st.session_state["pin_desbloqueado"] = False
 
-# PASO 1: INICIO DE SESIÓN COMPLETO POR DISPOSITIVO (PRIMERA VEZ)
 if not st.session_state["cuenta_usuario"]:
     st.title("📱 Administrador de finanzas")
     tab_log, tab_reg = st.tabs(["Iniciar Sesión", "Crear Cuenta"])
@@ -280,7 +278,7 @@ if not st.session_state["cuenta_usuario"]:
             if res:
                 st.session_state["cuenta_usuario"] = u_input
                 st.session_state["hogar_id"] = res["hogar_id"]
-                st.session_state["es_propietario"] = True if res["es_propietario"] == 1 else False
+                st.session_state["es_propietario"] = res["es_propietario"]
                 st.session_state["pin_usuario"] = res["pin"]
                 st.rerun()
             else:
@@ -297,7 +295,6 @@ if not st.session_state["cuenta_usuario"]:
             else:
                 st.error("Ingresa un correo verdadero válido.")
     st.stop()
-# PASO 2: DISPOSITIVO RECONOCIDO EXIGIENDO EL PIN DE ACCESO RÁPIDO
 if st.session_state["pin_usuario"] and not st.session_state["pin_desbloqueado"]:
     st.title("📱 Administrador de finanzas")
     st.info(f"Sesión activa: **{st.session_state['cuenta_usuario']}**")
@@ -310,7 +307,6 @@ if st.session_state["pin_usuario"] and not st.session_state["pin_desbloqueado"]:
             st.error("PIN incorrecto. Inténtalo de nuevo.")
     st.stop()
 
-# PASO 3: CONFIGURACIÓN OBLIGATORIA DEL PIN POR PRIMERA VEZ
 if not st.session_state["pin_usuario"]:
     st.title("⚙️ Configuración Obligatoria del PIN")
     st.warning("Define un código PIN corto de 4 números para abrir tu aplicación en el día a día.")
@@ -326,6 +322,7 @@ if not st.session_state["pin_usuario"]:
         else:
             st.error("Los códigos deben ser de 4 dígitos, numéricos y coincidir exactamente.")
     st.stop()
+
 # --- PANEL OPERATIVO AUTORIZADO (SISTEMA DESBLOQUEADO) ---
 usuario_logueado = st.session_state["cuenta_usuario"]
 hogar_actual = st.session_state["hogar_id"]
@@ -334,11 +331,9 @@ es_propietario = st.session_state["es_propietario"]
 st.title("📱 Administrador de finanzas")
 st.info(f"🟢 Conectado como: **{usuario_logueado}**")
 
-# INTERRUPTOR EXCLUSIVO DE MODO OCULTO TOTAL
 st.markdown("---")
 modo_oculto = st.toggle("👁️ Activar Modo Oculto (Censurar saldos y gráficos)", value=False)
 
-# Pestañas principales de navegación móvil en la pantalla principal
 tab_cuentas, tab_metas, tab_miembros = st.tabs(["📊 Control Mensual", "🎯 Metas de Ahorro", "👥 Invitar / Compartir"])
 with tab_metas:
     st.markdown("### 🎯 Tus Objetivos de Ahorro")
@@ -391,7 +386,7 @@ with tab_metas:
         else:
             st.caption("Aún no tienen logros guardados. ¡Completen su primera meta de ahorro para ganar una medalla!")
     else:
-        st.caption("No hay metas configuradas in este hogar.")
+        st.caption("No hay metas configuradas en este hogar.")
 with tab_cuentas:
     col_mes, col_ano = st.columns(2)
     with col_mes:
@@ -451,9 +446,9 @@ with tab_cuentas:
 
     col_add, col_del = st.columns(2)
     with col_add:
-        st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
+        st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["campo_alta_gasto"], key="gasto_input_field", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
     with col_del:
-        gastos_existentes = [row for row in saldos_db if row[2] == "Gasto"]
+        gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
         st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
 
     st.markdown("#### Valores del Periodo")
@@ -480,15 +475,20 @@ with tab_cuentas:
     if modo_oculto:
         st.warning("🔒 Los gráficos analíticos están ocultos de forma temporal debido al Modo Oculto activo.")
     else:
-        # --- MEJORA GRÁFICA PREMIUM CON ENTORNO OSCURO ---
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
         fig.patch.set_facecolor('#0E1117')
         ax1.set_facecolor("#0E1117")
         ax2.set_facecolor("#0E1117")
         
-        barras = ax1.bar(["Ingresos", "Gastos"], [total_ingresos, total_gastos], color=["#00C49F", "#FF8042"], width=0.4, edgecolor='none')
+        # AJUSTE PREMIUM: Barras delgadas (width=0.2)
+        barras = ax1.bar(["Ingresos", "Gastos"], [total_ingresos, total_gastos], color=["#00C49F", "#FF8042"], width=0.2, edgecolor='none')
         ax1.set_title("Balance Financiero", color="#E1E4E6", fontsize=12, fontweight="bold", pad=15)
         ax1.tick_params(colors="#A0A5AD", labelsize=10)
+        
+        # AJUSTE PREMIUM: Eje izquierdo fijado estrictamente desde 0$ con formateador CLP
+        ax1.set_ylim(bottom=0)
+        ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, pos: matrimonial_formatear_clp(x)))
+        
         ax1.spines['top'].set_visible(False)
         ax1.spines['right'].set_visible(False)
         ax1.spines['left'].set_color('#31333F')
@@ -520,7 +520,7 @@ with tab_cuentas:
 
     st.subheader("📁 Periodos Consolidados")
     meses_hist = obtener_meses_historicos(hogar_actual)
-    mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m[0] for m in meses_hist])
+    mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m for m in meses_hist])
     if mes_hist_sel != "Seleccione...":
         conn = sqlite3.connect(RUTA_DB)
         df_resumen = pd.read_sql_query("SELECT item as 'Concepto', monto as 'Monto' FROM historico WHERE hogar_id = ? AND mes_ano = ?", conn, params=(hogar_actual, mes_hist_sel))
@@ -560,6 +560,7 @@ st.markdown("---")
 if st.button("🔒 Bloquear Pantalla (Fijar PIN)", use_container_width=True):
     st.session_state["pin_desbloqueado"] = False
     st.rerun()
+
 
 
 
