@@ -3,6 +3,7 @@ import sqlite3
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
+import re  # Módulo nativo para validación por expresiones regulares
 
 st.set_page_config(page_title="Control Financiero Vinculado", page_icon="💰", layout="centered")
 
@@ -10,17 +11,20 @@ RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
 RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_dinamico.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
 
+def es_correo_valido(correo):
+    """Verifica si la estructura corresponde a un correo real."""
+    patron = r'^[\w\.-]+@[\w\.-]+\.\w+$'
+    return re.match(patron, correo) is not None
+
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    # Tabla de credenciales de usuario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             identificador TEXT PRIMARY KEY,
             clave TEXT NOT NULL
         )
     """)
-    # Tabla de saldos modificada para incluir al usuario propietario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             usuario_id TEXT,
@@ -30,7 +34,6 @@ def inicializar_db():
             PRIMARY KEY (usuario_id, item)
         )
     """)
-    # Tabla histórica modificada para incluir al usuario propietario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,7 +52,6 @@ def registrar_usuario_db(identificador, clave):
     cursor = conn.cursor()
     try:
         cursor.execute("INSERT INTO usuarios (identificador, clave) VALUES (?, ?)", (identificador, clave))
-        # Crear de forma automática su casilla de ingresos iniciales
         cursor.execute("INSERT INTO mes_activo (usuario_id, item, monto, tipo) VALUES (?, 'Ingresos Principales', 0.0, 'Ingreso')", (identificador,))
         conn.commit()
         exito = True
@@ -61,7 +63,7 @@ def registrar_usuario_db(identificador, clave):
 def verificar_usuario_db(identificador, clave):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("SELECT cl_id FROM (SELECT clave as cl_id FROM usuarios WHERE identificador = ?)", (identificador,))
+    cursor.execute("SELECT clave FROM usuarios WHERE identificador = ?", (identificador,))
     resultado = cursor.fetchone()
     conn.close()
     if resultado and resultado[0] == clave:
@@ -135,7 +137,7 @@ def obtener_meses_historicos(usuario_id):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE usuario_id = ? ORDER BY id DESC", (usuario_id,))
-    meses = [fila for fila in cursor.fetchall()]
+    meses = [fila[0] for fila in cursor.fetchall()]
     conn.close()
     return meses
 
@@ -147,26 +149,25 @@ def formatear_clp(monto):
 inicializar_db()
 st.title("📱 Sistema Financiero Personalizado")
 
-# Inicialización de estados de sesión
 if "sesion_activa" not in st.session_state:
     st.session_state["sesion_activa"] = False
 if "cuenta_usuario" not in st.session_state:
     st.session_state["cuenta_usuario"] = ""
 
-# Formulario de Acceso Seguro
 if not st.session_state["sesion_activa"]:
     pestana_login, pestana_registro = st.tabs(["🔒 Iniciar Sesión", "📝 Crear Cuenta"])
     
     with pestana_login:
         st.subheader("Acceso a tu Cuenta")
-        usuario_input = st.text_input("Correo o Teléfono (ej: +56912345678):", key="login_user", placeholder="usuario@correo.com o celular")
+        usuario_input = st.text_input("Ingresa tu Correo Electrónico:", key="login_user", placeholder="ejemplo@correo.com")
         clave_input = st.text_input("Contraseña:", type="password", key="login_pass")
         
         if st.button("🔓 Entrar", use_container_width=True):
-            if usuario_input.strip() and clave_input.strip():
-                if verificar_usuario_db(usuario_input.strip(), clave_input.strip()):
+            user_clean = usuario_input.strip().lower()
+            if user_clean and clave_input.strip():
+                if verificar_usuario_db(user_clean, clave_input.strip()):
                     st.session_state["sesion_activa"] = True
-                    st.session_state["cuenta_usuario"] = usuario_input.strip()
+                    st.session_state["cuenta_usuario"] = user_clean
                     st.toast("Sesión iniciada con éxito.", icon="✅")
                     st.rerun()
                 else:
@@ -175,21 +176,25 @@ if not st.session_state["sesion_activa"]:
                 st.warning("Por favor rellene todos los campos.")
                 
     with pestana_registro:
-        st.subheader("Enlaza una Nueva Cuenta")
-        nuevo_usuario = st.text_input("Registrar Correo o Teléfono:", key="reg_user", placeholder="ejemplo@correo.com")
+        st.subheader("Enlaza un Correo Verdadero")
+        nuevo_usuario = st.text_input("Registrar Correo Electrónico:", key="reg_user", placeholder="tu_correo@dominio.com")
         nueva_clave = st.text_input("Definir Contraseña:", type="password", key="reg_pass")
         
         if st.button("🚀 Crear y Vincular Cuenta", use_container_width=True):
-            if nuevo_usuario.strip() and nueva_clave.strip():
-                if registrar_usuario_db(nuevo_usuario.strip(), nueva_clave.strip()):
-                    st.success("¡Cuenta enlazada correctamente! Ya puedes iniciar sesión desde la otra pestaña.")
+            user_reg_clean = nuevo_usuario.strip().lower()
+            if user_reg_clean and nueva_clave.strip():
+                # Validación estricta antes de escribir en la Base de Datos
+                if es_correo_valido(user_reg_clean):
+                    if registrar_usuario_db(user_reg_clean, nueva_clave.strip()):
+                        st.success("¡Cuenta vinculada con éxito! Ya puedes iniciar sesión desde la primera pestaña.")
+                    else:
+                        st.error("Este correo ya se encuentra enlazado a una cuenta activa.")
                 else:
-                    st.error("Ese correo o teléfono ya se encuentra vinculado a una cuenta activa.")
+                    st.error("Por favor, introduce una dirección de correo válida (ejemplo@dominio.com).")
             else:
                 st.warning("Por favor ingrese datos válidos.")
     st.stop()
 
-# --- A PARTIR DE AQUÍ TODO SE FILTRA POR EL USUARIO LOGUEADO ---
 usuario_logueado = st.session_state["cuenta_usuario"]
 st.info(f"🟢 Cuenta activa vinculada: **{usuario_logueado}**")
 st.subheader("📅 Periodo Contable Activo")
@@ -222,6 +227,7 @@ with st.expander("👥 Añadir casilla para sueldos compartidos"):
 saldos_db = obtener_todos_los_saldos(usuario_logueado)
 
 total_ingresos = 0.0
+# Corrección de la validación del elemento indexado en la tupla
 ingresos_existentes = [row for row in saldos_db if row[2] == "Ingreso"]
 
 for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
@@ -348,6 +354,7 @@ if st.button("🔒 Cerrar Sesión Segura", use_container_width=True):
     st.session_state["sesion_activa"] = False
     st.session_state["cuenta_usuario"] = ""
     st.rerun()
+
 
 
 
