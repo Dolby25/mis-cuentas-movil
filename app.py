@@ -4,7 +4,10 @@ import os
 import pandas as pd
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Control Financiero", page_icon="💰", layout="centered")
+st.set_page_config(page_title="Control Financiero Privado", page_icon="💰", layout="centered")
+
+# CONTRASEÑA DE ACCESO REQUERIDA (Cambia esto por tu clave personal)
+PASSWORD_CORRECTA = "MiClaveSecreta123"
 
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
 RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_dinamico.db")
@@ -112,7 +115,25 @@ def formatear_clp(monto):
     return formato_numero if monto >= 0 else f"-{formato_numero}"
 
 inicializar_db()
-st.title("📱 Control Financiero Móvil")
+st.title("📱 Control Financiero Privado")
+
+# CONTROL DE AUTENTICACIÓN
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+
+if not st.session_state["autenticado"]:
+    st.subheader("🔒 Acceso Restringido")
+    clave_ingresada = st.text_input("Introduce tu clave personal para desbloquear:", type="password")
+    
+    if st.button("🔓 Iniciar Sesión", use_container_width=True):
+        if clave_ingresada == PASSWORD_CORRECTA:
+            st.session_state["autenticado"] = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta. Inténtalo de nuevo.")
+    st.stop()  # Detiene la renderización por completo si no está validado
+
+# --- TODO EL CÓDIGO INFERIOR SOLO SE MUESTRA SI LA CLAVE ES CORRECTA ---
 
 st.subheader("👤 Bienvenido al sistema")
 usuario_app = st.text_input("Ingrese su nombre para comenzar:", value="", placeholder="Escriba su nombre aquí...")
@@ -148,14 +169,12 @@ with st.expander("👥 Añadir casilla para sueldos compartidos"):
 saldos_db = obtener_todos_los_saldos()
 
 total_ingresos = 0.0
-# Corrección del filtro crítico de tuplas de SQLite
 ingresos_existentes = [row for row in saldos_db if row[2] == "Ingreso"]
 
 for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
     col_ing_txt, col_ing_del = st.columns([0.85, 0.15])
     
     with col_ing_txt:
-        # Se cambia a number_input numérico para evitar errores de escritura con máscaras de texto
         ingreso_num = st.number_input(f"Monto {item_nom} (CLP $):", value=int(valor_monto), min_value=0, step=1000, key=f"ingreso_input_{item_nom}")
     
     with col_ing_del:
@@ -270,6 +289,13 @@ if mes_hist_sel != "Seleccione...":
     conn.close()
     df_resumen['Monto'] = df_resumen['Monto'].apply(formatear_clp)
     st.dataframe(df_resumen, use_container_width=True)
+
+# Botón para cerrar sesión manualmente al terminar
+st.markdown("---")
+if st.button("🔒 Cerrar Sesión Segura", use_container_width=True):
+    st.session_state["autenticado"] = False
+    st.rerun()
+
 
 
 
