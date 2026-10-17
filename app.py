@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Administrador de finanzas", page_icon="💰", layout="centered")
 
-# CONFIGURACIÓN DE LAS RUTAS DE LA BASE DE DATOS Y EXCEL
+# CONFIGURACIÓN DE LAS RUTAS DE LA BASE DE DATOS Y REPORTE EXCEL
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
 RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v5.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
@@ -90,6 +90,7 @@ def registrar_usuario_db(identificador, clave):
     return exito
 
 def verificar_usuario_db(identificador, clave):
+    """Mapea con total exactitud los índices posicionales individuales de la tupla de SQLite."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT clave, hogar_id, es_propietario, pin FROM usuarios WHERE identificador = ?", (identificador,))
@@ -127,7 +128,7 @@ def obtener_codigo_activo_db(hogar_id):
     conn.close()
     return fila[0] if fila else None
 
-def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
+def nlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT hogar_id FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
@@ -163,6 +164,7 @@ def obtener_metas_db(hogar_id):
     return pd.DataFrame(filas, columns=columnas)
 
 def abonar_a_meta_db(meta_id, monto):
+    """Desempaqueta de forma individual y segura los dos montos mapeados en SQLite."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT monto_actual, monto_objetivo FROM metas_ahorro WHERE id = ?", (meta_id,))
@@ -242,7 +244,7 @@ def obtener_meses_historicos(hogar_id):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE hogar_id = ? ORDER BY id DESC", (hogar_id,))
-    meses = [fila for fila in cursor.fetchall()]
+    meses = [fila[0] for fila in cursor.fetchall()]
     conn.close()
     return meses
 
@@ -257,7 +259,7 @@ def ocultar_monto_clp(monto, modo_oculto_activo):
     return matrimonial_formatear_clp(monto)
 
 inicializar_db()
-# --- INITIALIZACIÓN DE SESIONES EN STREAMLIT ---
+# --- INICIALIZACIÓN DE VARIABLES EN MEMORIA (SESSION STATE) ---
 if "cuenta_usuario" not in st.session_state:
     st.session_state["cuenta_usuario"] = ""
 if "hogar_id" not in st.session_state:
@@ -280,7 +282,7 @@ if not st.session_state["cuenta_usuario"]:
             if res:
                 st.session_state["cuenta_usuario"] = u_input
                 st.session_state["hogar_id"] = res["hogar_id"]
-                st.session_state["es_propietario"] = res["es_propietario"]
+                st.session_state["es_propietario"] = True if res["es_propietario"] == 1 else False
                 st.session_state["pin_usuario"] = res["pin"]
                 st.rerun()
             else:
@@ -483,12 +485,12 @@ with tab_cuentas:
         ax1.set_facecolor("#0E1117")
         ax2.set_facecolor("#0E1117")
         
-        # AJUSTE PREMIUM: Barras delgadas (width=0.2)
+        # Barras delgadas estilizadas premium (width=0.2)
         barras = ax1.bar(["Ingresos", "Gastos"], [total_ingresos, total_gastos], color=["#00C49F", "#FF8042"], width=0.2, edgecolor='none')
         ax1.set_title("Balance Financiero", color="#E1E4E6", fontsize=12, fontweight="bold", pad=15)
         ax1.tick_params(colors="#A0A5AD", labelsize=10)
         
-        # AJUSTE PREMIUM: Eje izquierdo fijado estrictamente desde 0$ con formato CLP
+        # Eje izquierdo fijado desde 0$ en CLP
         ax1.set_ylim(bottom=0)
         ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, pos: matrimonial_formatear_clp(x)))
         
@@ -523,7 +525,7 @@ with tab_cuentas:
 
     st.subheader("📁 Periodos Consolidados")
     meses_hist = obtener_meses_historicos(hogar_actual)
-    mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m[0] for m in meses_hist])
+    mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + meses_hist)
     if mes_hist_sel != "Seleccione...":
         conn = sqlite3.connect(RUTA_DB)
         df_resumen = pd.read_sql_query("SELECT item as 'Concepto', monto as 'Monto' FROM historico WHERE hogar_id = ? AND mes_ano = ?", conn, params=(hogar_actual, mes_hist_sel))
@@ -552,7 +554,7 @@ with tab_miembros:
         cod_ing = st.text_input("Introduce el código de invitación (Ej: INV-A1B2):", placeholder="INV-XXXX", key="p3_token").strip().upper()
         if st.button("Confirmar Vinculación", use_container_width=True, key="p3_btn_token"):
             if cod_ing:
-                if enlazar_y_quemar_codigo_db(usuario_logueado, cod_ing):
+                if nlazar_y_quemar_codigo_db(usuario_logueado, cod_ing):
                     st.success("¡Cuentas enlazadas de forma correcta!")
                     st.session_state["pin_desbloqueado"] = False
                     st.rerun()
