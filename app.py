@@ -12,7 +12,6 @@ st.set_page_config(page_title="Administrador de finanzas", page_icon="💰", lay
 
 # RUTA DE ARCHIVOS DE LA APLICACIÓN
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
-# Versión v5 unificada para evitar conflictos de columnas antiguas en Streamlit Cloud
 RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v5.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
 
@@ -28,7 +27,6 @@ def generar_string_aleatorio():
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    # Tabla de usuarios con soporte para el PIN de 4 dígitos
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             identificador TEXT PRIMARY KEY,
@@ -38,14 +36,12 @@ def inicializar_db():
             pin TEXT DEFAULT NULL
         )
     """)
-    # Tabla temporal de invitaciones de uso único
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS codigos_invitacion (
             hogar_id TEXT PRIMARY KEY,
             codigo TEXT NOT NULL UNIQUE
         )
     """)
-    # Tabla de saldos indexada por el hogar compartido
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             hogar_id TEXT,
@@ -55,7 +51,6 @@ def inicializar_db():
             PRIMARY KEY (hogar_id, item)
         )
     """)
-    # Tabla histórica indexada por el hogar compartido
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +61,6 @@ def inicializar_db():
             tipo TEXT NOT NULL DEFAULT 'Gasto'
         )
     """)
-    # Tabla para las Metas de Ahorro y Logros del Hogar
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metas_ahorro (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,18 +91,16 @@ def registrar_usuario_db(identificador, clave):
     return exito
 
 def verificar_usuario_db(identificador, clave):
-    """Extrae y valida de forma segura todos los campos necesarios del perfil."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT clave, hogar_id, es_propietario, pin FROM usuarios WHERE identificador = ?", (identificador,))
     resultado = cursor.fetchone()
     conn.close()
-    
-    if resultado and resultado[0] == clave:
+    if resultado and resultado == clave:
         return {
-            "hogar_id": resultado[1],
-            "es_propietario": resultado[2],
-            "pin": resultado[3]
+            "hogar_id": resultado,
+            "es_propietario": resultado,
+            "pin": resultado
         }
     return None
 
@@ -134,7 +126,7 @@ def obtener_codigo_activo_db(hogar_id):
     cursor.execute("SELECT codigo FROM codigos_invitacion WHERE hogar_id = ?", (hogar_id,))
     fila = cursor.fetchone()
     conn.close()
-    return fila[0] if fila else None
+    return fila if fila else None
 
 def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
     conn = sqlite3.connect(RUTA_DB)
@@ -142,7 +134,7 @@ def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
     cursor.execute("SELECT hogar_id FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
     resultado = cursor.fetchone()
     if resultado:
-        hogar_destino = resultado[0]
+        hogar_destino = resultado
         cursor.execute("UPDATE usuarios SET hogar_id = ?, es_propietario = 0 WHERE identificador = ?", (hogar_destino, usuario_id))
         cursor.execute("DELETE FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
         conn.commit()
@@ -163,17 +155,11 @@ def insertar_meta_db(hogar_id, nombre, objetivo, plazo):
     conn.close()
 
 def obtener_metas_db(hogar_id):
-    """Usa cursores nativos para leer de forma segura las metas y logros en Streamlit Cloud."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, nombre, monto_objetivo, monto_actual, fecha_inicio, plazo_dias, completado 
-        FROM metas_ahorro 
-        WHERE hogar_id = ?
-    """, (hogar_id,))
+    cursor.execute("SELECT id, nombre, monto_objetivo, monto_actual, fecha_inicio, plazo_dias, completado FROM metas_ahorro WHERE hogar_id = ?", (hogar_id,))
     filas = cursor.fetchall()
     conn.close()
-    
     columnas = ['id', 'nombre', 'monto_objetivo', 'monto_actual', 'fecha_inicio', 'plazo_dias', 'completado']
     return pd.DataFrame(filas, columns=columnas)
 
@@ -183,8 +169,8 @@ def abonar_a_meta_db(meta_id, monto):
     cursor.execute("SELECT monto_actual, monto_objetivo FROM metas_ahorro WHERE id = ?", (meta_id,))
     res = cursor.fetchone()
     if res:
-        monto_actual = res[0]
-        monto_objetivo = res[1]
+        monto_actual = res
+        monto_objetivo = res
         nuevo_monto = monto_actual + monto
         completado = 1 if nuevo_monto >= monto_objetivo else 0
         cursor.execute("UPDATE metas_ahorro SET monto_actual = ?, completado = ? WHERE id = ?", (nuevo_monto, completado, meta_id))
@@ -267,6 +253,12 @@ def formatear_clp(monto):
     formato_numero = f"${valor_absoluto:,}".replace(",", ".")
     return formato_numero if monto >= 0 else f"-{formato_numero}"
 
+def ocultar_monto_clp(monto, modo_oculto_activo):
+    """Censura dinámicamente las cifras en asteriscos si el Modo Oculto está encendido."""
+    if modo_oculto_activo:
+        return "$ •••.•••"
+    return formatear_clp(monto)
+
 inicializar_db()
 
 # --- CONTROL DE ACCESO PERSISTENTE Y BLOQUEO POR PIN ---
@@ -281,11 +273,9 @@ if "pin_usuario" not in st.session_state:
 if "pin_desbloqueado" not in st.session_state:
     st.session_state["pin_desbloqueado"] = False
 
-# Caso 1: No hay sesión iniciada (Primera vez en el dispositivo)
 if not st.session_state["cuenta_usuario"]:
     st.title("📱 Administrador de finanzas")
     tab_log, tab_reg = st.tabs(["Iniciar Sesión", "Crear Cuenta"])
-    
     with tab_log:
         u_input = st.text_input("Correo Electrónico:", key="main_u").strip().lower()
         p_input = st.text_input("Contraseña:", type="password", key="main_p")
@@ -299,21 +289,19 @@ if not st.session_state["cuenta_usuario"]:
                 st.rerun()
             else:
                 st.error("Credenciales incorrectas.")
-                
     with tab_reg:
         u_reg = st.text_input("Registrar Nuevo Correo:", key="reg_u").strip().lower()
         p_reg = st.text_input("Definir Contraseña:", type="password", key="reg_pass")
         if st.button("🚀 Crear Cuenta Familiar", use_container_width=True):
             if es_correo_valido(u_reg) and p_reg.strip():
                 if registrar_usuario_db(u_reg, p_reg.strip()):
-                    st.success("¡Cuenta vinculada! Ahora puedes iniciar sesión en la primera pestaña.")
+                    st.success("¡Cuenta vinculada! Ahora puedes iniciar sesión.")
                 else:
                     st.error("Ese correo ya existe en el sistema.")
             else:
                 st.error("Ingresa un correo verdadero válido.")
     st.stop()
 
-# Caso 2: El correo está guardado pero exige el bloqueo por PIN rápido de 4 dígitos
 if st.session_state["pin_usuario"] and not st.session_state["pin_desbloqueado"]:
     st.title("📱 Administrador de finanzas")
     st.info(f"Sesión activa: **{st.session_state['cuenta_usuario']}**")
@@ -326,10 +314,9 @@ if st.session_state["pin_usuario"] and not st.session_state["pin_desbloqueado"]:
             st.error("PIN incorrecto. Inténtalo de nuevo.")
     st.stop()
 
-# Caso 3: Dispositivo conectado por correo pero aún no configura su PIN de 4 números
 if not st.session_state["pin_usuario"]:
     st.title("⚙️ Configuración Obligatoria del PIN")
-    st.warning("Define un código PIN corto de 4 números para abrir tu aplicación en el día a día sin escribir contraseñas largas.")
+    st.warning("Define un código PIN corto de 4 números para abrir tu aplicación en el día a día.")
     nuevo_pin_1 = st.text_input("Crea tu PIN rápido de 4 dígitos:", type="password", max_chars=4, placeholder="Ej: 1234")
     nuevo_pin_2 = st.text_input("Confirma tu PIN:", type="password", max_chars=4)
     if st.button("💾 Guardar PIN de Seguridad", use_container_width=True):
@@ -349,6 +336,10 @@ es_propietario = st.session_state["es_propietario"]
 
 st.title("📱 Administrador de finanzas")
 st.info(f"🟢 Conectado como: **{usuario_logueado}**")
+
+# INTERRUPTOR EXCLUSIVO DE MODO OCULTO EN LA PANTALLA PRINCIPAL
+st.markdown("---")
+modo_oculto = st.toggle("👁️ Activar Modo Oculto (Censurar saldos y gráficos)", value=False, help="Oculta tus montos financieros en asteriscos si estás en la calle o transporte público.")
 
 # Pestañas principales de navegación móvil en la pantalla principal
 tab_cuentas, tab_metas, tab_miembros = st.tabs(["📊 Control Mensual", "🎯 Metas de Ahorro", "👥 Invitar / Compartir"])
@@ -382,7 +373,10 @@ with tab_metas:
             
             col_m1, col_m2 = st.columns(2)
             with col_m1:
-                st.write(f"Ahorrado: {formatear_clp(row['monto_actual'])} de {formatear_clp(row['monto_objetivo'])}")
+                # Aplicación del Modo Oculto en las cifras de la meta
+                ahorrado_txt = ocultar_monto_clp(row['monto_actual'], modo_oculto)
+                objetivo_txt = ocultar_monto_clp(row['monto_objetivo'], modo_oculto)
+                st.write(f"Ahorrado: {ahorrado_txt} de {objetivo_txt}")
             with col_m2:
                 if dias_restantes >= 0 and row['completado'] == 0:
                     st.write(f"⏳ Quedan **{dias_restantes} días** de plazo.")
@@ -404,7 +398,8 @@ with tab_metas:
         metas_ganadas = df_metas[df_metas['completado'] == 1]
         if not metas_ganadas.empty:
             for idx, m in metas_ganadas.iterrows():
-                st.success(f"🏅 **LOGRO DESBLOQUEADO:** ¡Cumplieron la meta **'{m['nombre']}'** ahorrando un total de {formatear_clp(m['monto_objetivo'])} con éxito! Guardado permanentemente.")
+                obj_ganado_txt = ocultar_monto_clp(m['monto_objetivo'], modo_oculto)
+                st.success(f"🏅 **LOGRO DESBLOQUEADO:** ¡Cumplieron la meta **'{m['nombre']}'** ahorrando un total de {obj_ganado_txt} con éxito! Guardado permanentemente.")
         else:
             st.caption("Aún no tienen logros guardados. ¡Completen su primera meta de ahorro para ganar una medalla!")
     else:
@@ -491,28 +486,34 @@ with tab_cuentas:
     saldo_disponible = total_ingresos - total_gastos
     st.markdown("---")
     st.markdown("### 📊 Cuadro de Mando de Analíticas")
-    st.metric("Total Ingresos", formatear_clp(total_ingresos))
-    st.metric("Total Gastos", formatear_clp(total_gastos))
-    st.metric("Balance Neto", formatear_clp(saldo_disponible))
+    
+    # Aplicación del Modo Oculto en las tarjetas de métricas
+    st.metric("Total Ingresos", ocultar_monto_clp(total_ingresos, modo_oculto))
+    st.metric("Total Gastos", ocultar_monto_clp(total_gastos, modo_oculto))
+    st.metric("Balance Neto", ocultar_monto_clp(saldo_disponible, modo_oculto))
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
-    fig.patch.set_facecolor('#282C34')
-    ax1.set_facecolor("#282C34")
-    ax2.set_facecolor("#282C34")
-
-    barras = ax1.bar(["Ingresos", "Gastos"], [total_ingresos, total_gastos], color=["#4A90E2", "#E74C3C"], width=0.4)
-    ax1.set_title("Balance Financiero", color="#E1E4E6", fontsize=12, fontweight="bold")
-    ax1.tick_params(colors="#A0A5AD", labelsize=10)
-    for bar in barras:
-        yval = bar.get_height()
-        ax1.text(bar.get_x() + bar.get_width()/2, yval + 1, formatear_clp(yval), ha='center', va='bottom', color='#E1E4E6', fontsize=10, fontweight="bold")
-
-    if gastos_filtrados:
-        ax2.pie(gastos_filtrados.values(), labels=gastos_filtrados.keys(), autopct='%1.1f%%', startangle=90, textprops=dict(color="#E1E4E6", fontsize=10), colors=['#4A90E2', '#357ABD', '#225E9B', '#1B4780', '#5C9CE6'])
-        ax2.set_title("Distribución de Egresos", color="#E1E4E6", fontsize=12, fontweight="bold")
+    # Ocultar o mostrar las gráficas según el Modo Oculto
+    if modo_oculto:
+        st.warning("🔒 Los gráficos analíticos están ocultos de forma temporal debido al Modo Oculto activo.")
     else:
-        ax2.text(0.5, 0.5, 'Sin transacciones de egreso', ha='center', va='center', color='#8A9099', fontsize=10)
-    st.pyplot(fig)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
+        fig.patch.set_facecolor('#282C34')
+        ax1.set_facecolor("#282C34")
+        ax2.set_facecolor("#282C34")
+
+        barras = ax1.bar(["Ingresos", "Gastos"], [total_ingresos, total_gastos], color=["#4A90E2", "#E74C3C"], width=0.4)
+        ax1.set_title("Balance Financiero", color="#E1E4E6", fontsize=12, fontweight="bold")
+        ax1.tick_params(colors="#A0A5AD", labelsize=10)
+        for bar in barras:
+            yval = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2, yval + 1, formatear_clp(yval), ha='center', va='bottom', color='#E1E4E6', fontsize=10, fontweight="bold")
+
+        if gastos_filtrados:
+            ax2.pie(gastos_filtrados.values(), labels=gastos_filtrados.keys(), autopct='%1.1f%%', startangle=90, textprops=dict(color="#E1E4E6", fontsize=10), colors=['#4A90E2', '#357ABD', '#225E9B', '#1B4780', '#5C9CE6'])
+            ax2.set_title("Distribución de Egresos", color="#E1E4E6", fontsize=12, fontweight="bold")
+        else:
+            ax2.text(0.5, 0.5, 'Sin transacciones de egreso', ha='center', va='center', color='#8A9099', fontsize=10)
+        st.pyplot(fig)
 
     if st.button("🗄️ Archivar Periodo y Actualizar Excel", use_container_width=True):
         if total_ingresos + total_gastos > 0:
@@ -527,7 +528,7 @@ with tab_cuentas:
         conn = sqlite3.connect(RUTA_DB)
         df_resumen = pd.read_sql_query("SELECT item as 'Concepto', monto as 'Monto' FROM historico WHERE hogar_id = ? AND mes_ano = ?", conn, params=(hogar_actual, mes_hist_sel))
         conn.close()
-        df_resumen['Monto'] = df_resumen['Monto'].apply(formatear_clp)
+        df_resumen['Monto'] = df_resumen['Monto'].apply(lambda x: ocultar_monto_clp(x, modo_oculto))
         st.dataframe(df_resumen, use_container_width=True)
 
 # --- TAB DE INVITACIONES COMPARTIDAS ---
