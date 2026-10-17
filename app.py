@@ -8,7 +8,7 @@ import random
 import string
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Control de finanzas", page_icon="💰", layout="centered")
+st.set_page_config(page_title="Administrador de finanzas", page_icon="💰", layout="centered")
 
 # RUTA DE ARCHIVOS DE LA APLICACIÓN
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
@@ -174,7 +174,6 @@ def obtener_metas_db(hogar_id):
     filas = cursor.fetchall()
     conn.close()
     
-    # Creamos un DataFrame de Pandas estructurado a mano de forma limpia
     columnas = ['id', 'nombre', 'monto_objetivo', 'monto_actual', 'fecha_inicio', 'plazo_dias', 'completado']
     return pd.DataFrame(filas, columns=columnas)
 
@@ -259,7 +258,7 @@ def obtener_meses_historicos(hogar_id):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE hogar_id = ? ORDER BY id DESC", (hogar_id,))
-    meses = [fila[0] for fila in cursor.fetchall()]
+    meses = [fila for fila in cursor.fetchall()]
     conn.close()
     return meses
 
@@ -284,7 +283,7 @@ if "pin_desbloqueado" not in st.session_state:
 
 # Caso 1: No hay sesión iniciada (Primera vez en el dispositivo)
 if not st.session_state["cuenta_usuario"]:
-    st.title("🔒 Registro e Inicio de Sesión Inicial")
+    st.title("📱 Administrador de finanzas")
     tab_log, tab_reg = st.tabs(["Iniciar Sesión", "Crear Cuenta"])
     
     with tab_log:
@@ -316,7 +315,7 @@ if not st.session_state["cuenta_usuario"]:
 
 # Caso 2: El correo está guardado pero exige el bloqueo por PIN rápido de 4 dígitos
 if st.session_state["pin_usuario"] and not st.session_state["pin_desbloqueado"]:
-    st.title("🔒 Acceso de Seguridad Rápido")
+    st.title("📱 Administrador de finanzas")
     st.info(f"Sesión activa: **{st.session_state['cuenta_usuario']}**")
     pin_ingresado = st.text_input("Introduce tu PIN numérico de 4 dígitos:", type="password", max_chars=4, placeholder="••••")
     if st.button("🔓 Desbloquear App", use_container_width=True):
@@ -348,7 +347,7 @@ usuario_logueado = st.session_state["cuenta_usuario"]
 hogar_actual = st.session_state["hogar_id"]
 es_propietario = st.session_state["es_propietario"]
 
-st.title("📱 Sistema Financiero Familiar Compartido")
+st.title("📱 Administrador de finanzas")
 st.info(f"🟢 Conectado como: **{usuario_logueado}**")
 
 # Pestañas principales de navegación móvil en la pantalla principal
@@ -436,7 +435,7 @@ with tab_cuentas:
 
     saldos_db = obtener_todos_los_saldos(hogar_actual)
     total_ingresos = 0.0
-    ingresos_existentes = [row for row in saldos_db if row == "Ingreso"]
+    ingresos_existentes = [row for row in saldos_db if row[2] == "Ingreso"]
 
     for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
         col_ing_txt, col_ing_del = st.columns([0.85, 0.15])
@@ -472,7 +471,7 @@ with tab_cuentas:
     with col_add:
         st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
     with col_del:
-        gastos_existentes = [row for row in saldos_db if row == "Gasto"]
+        gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
         st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
 
     st.markdown("#### Valores del Periodo")
@@ -523,7 +522,7 @@ with tab_cuentas:
 
     st.subheader("📁 Periodos Consolidados")
     meses_hist = obtener_meses_historicos(hogar_actual)
-    mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m for m in meses_hist])
+    mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m[0] for m in meses_hist])
     if mes_hist_sel != "Seleccione...":
         conn = sqlite3.connect(RUTA_DB)
         df_resumen = pd.read_sql_query("SELECT item as 'Concepto', monto as 'Monto' FROM historico WHERE hogar_id = ? AND mes_ano = ?", conn, params=(hogar_actual, mes_hist_sel))
@@ -566,6 +565,7 @@ st.markdown("---")
 if st.button("🔒 Bloquear Pantalla (Fijar PIN)", use_container_width=True):
     st.session_state["pin_desbloqueado"] = False
     st.rerun()
+
 
 
 
