@@ -9,24 +9,20 @@ import string
 
 st.set_page_config(page_title="Control Financiero Familiar", page_icon="💰", layout="centered")
 
-# RUTA DE ARCHIVOS DE LA APLICACIÓN
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
 RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v4.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
 
 def es_correo_valido(correo):
-    """Verifica si la estructura corresponde a un correo real."""
     patron = r'^[\w\.-]+@[\w\.-]+\.\w+$'
     return re.match(patron, correo) is not None
 
 def generar_string_aleatorio():
-    """Genera un código dinámico único de 6 caracteres."""
     return "INV-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
 
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    # Almacenamos el identificador del usuario, su clave, su hogar_id actual y su rol
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             identificador TEXT PRIMARY KEY,
@@ -35,14 +31,12 @@ def inicializar_db():
             es_propietario INTEGER NOT NULL DEFAULT 1
         )
     """)
-    # Tabla temporal para almacenar los códigos activos de uso único
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS codigos_invitacion (
             hogar_id TEXT PRIMARY KEY,
             codigo TEXT NOT NULL UNIQUE
         )
     """)
-    # Las cuentas operativas se guardan indexadas por el hogar compartido
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             hogar_id TEXT,
@@ -52,7 +46,6 @@ def inicializar_db():
             PRIMARY KEY (hogar_id, item)
         )
     """)
-    # El histórico se archiva bajo el hogar compartido
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +74,6 @@ def registrar_usuario_db(identificador, clave):
     return exito
 
 def verificar_usuario_db(identificador, clave):
-    """Extrae y valida todos los campos necesarios del perfil."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT clave, hogar_id, es_propietario FROM usuarios WHERE identificador = ?", (identificador,))
@@ -96,7 +88,6 @@ def verificar_usuario_db(identificador, clave):
     return None
 
 def solicitar_nuevo_codigo_db(hogar_id):
-    """Genera o renueva un código aleatorio único en la DB para este hogar."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     nuevo_codigo = generar_string_aleatorio()
@@ -114,7 +105,6 @@ def obtener_codigo_activo_db(hogar_id):
     return fila[0] if fila else None
 
 def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
-    """Asigna al usuario al nuevo hogar y destruye el código de inmediato."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT hogar_id FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
@@ -122,9 +112,7 @@ def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
     
     if resultado:
         hogar_destino = resultado[0]
-        # Actualizamos el hogar de la persona invitada y cambiamos su rol a miembro (0)
         cursor.execute("UPDATE usuarios SET hogar_id = ?, es_propietario = 0 WHERE identificador = ?", (hogar_destino, usuario_id))
-        # Destruimos el código usado para que nadie más lo use
         cursor.execute("DELETE FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
         conn.commit()
         exito = True
@@ -210,7 +198,7 @@ def formatear_clp(monto):
     return formato_numero if monto >= 0 else f"-{formato_numero}"
 
 inicializar_db()
-# --- INTERFAZ VISUAL DE REGISTRO E INICIO DE SESIÓN ---
+# --- INTERFAZ VISUAL ---
 st.title("📱 Sistema Financiero Familiar Compartido")
 
 if "sesion_activa" not in st.session_state:
@@ -271,39 +259,42 @@ es_propietario = st.session_state["es_propietario"]
 
 st.info(f"👤 Cuenta activa: **{usuario_logueado}**")
 
-# PANEL DINÁMICO DE CONTROL DE INVITACIONES (PANTALLA PRINCIPAL VISIBLE)
+# PANEL COMPARTIDO VISIBLE CON AMBAS OPCIONES
 st.markdown("### 👥 Panel de Miembros Compartidos")
+tab_enviar, tab_recibir = st.tabs(["✉️ Enviar Invitación", "🔗 Ingresar Código Recibido"])
 
-if es_propietario:
-    with st.expander("✉️ Secciones de Invitación Exclusiva (Propietario)", expanded=True):
-        st.write("Como propietario, puedes generar un código aleatorio único para invitar a otra persona.")
-        
+with tab_enviar:
+    if es_propietario:
+        st.write("Genera un código aleatorio único para invitar a otra persona a tu panel.")
         codigo_actual_db = obtener_codigo_activo_db(hogar_actual)
         if codigo_actual_db:
             st.markdown(f"Código activo para enviar:")
             st.code(codigo_actual_db, language="text")
             st.caption("⚠️ Este código caducará automáticamente en cuanto la otra persona lo use para ingresar.")
         else:
-            st.warning("No tienes ningún código de invitación activo en este momento.")
+            st.warning("No tienes ningún código de invitación activo.")
             
         if st.button("🔄 Generar / Renovar Código Único", use_container_width=True):
             solicitar_nuevo_codigo_db(hogar_actual)
-            st.success("¡Se ha generado un nuevo código de uso único!")
+            st.success("¡Código generado con éxito!")
             st.rerun()
-else:
-    with st.expander("🔗 Unirse a otro panel familiar", expanded=True):
-        codigo_ingresado = st.text_input("Ingresa un código de invitación recibido:", placeholder="Ej: INV-X83A").strip().upper()
-        if st.button("Confirmar Vinculación de Cuentas", use_container_width=True):
-            if codigo_ingresado:
-                if enlazar_y_quemar_codigo_db(usuario_logueado, codigo_ingresado):
-                    st.session_state["hogar_id"] = codigo_ingresado
-                    st.session_state["es_propietario"] = False
-                    st.success("¡Cuentas enlazadas de forma correcta! El código temporal ha sido destruido.")
-                    st.rerun()
-                else:
-                    st.error("El código ingresado es inválido, ya fue utilizado o ha caducado.")
+    else:
+        st.warning("Solo el propietario original del hogar puede emitir códigos de invitación.")
+
+with tab_recibir:
+    st.write("¿Te enviaron un código? Ingrésalo aquí para enlazar tus cuentas de inmediato.")
+    codigo_ingresado = st.text_input("Introduce el código de invitación (Ej: INV-A1B2):", placeholder="INV-XXXX").strip().upper()
+    if st.button("Confirmar Vinculación de Cuentas", use_container_width=True):
+        if codigo_ingresado:
+            if enlazar_y_quemar_codigo_db(usuario_logueado, codigo_ingresado):
+                st.session_state["hogar_id"] = codigo_ingresado
+                st.session_state["es_propietario"] = False
+                st.success("¡Cuentas vinculadas! El código temporal ha sido destruido por seguridad.")
+                st.rerun()
             else:
-                st.warning("Por favor escribe el token de acceso.")
+                st.error("El código ingresado es inválido, ya caducó o fue utilizado por alguien más.")
+        else:
+            st.warning("Por favor escribe el token de acceso.")
 st.markdown("---")
 st.subheader("📅 Periodo Contable Activo")
 col_mes, col_ano = st.columns(2)
