@@ -8,7 +8,7 @@ import random
 import string
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Control Financiero Familiar", page_icon="💰", layout="centered")
+st.set_page_config(page_title="Control de finanzas", page_icon="💰", layout="centered")
 
 # RUTA DE ARCHIVOS DE LA APLICACIÓN
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
