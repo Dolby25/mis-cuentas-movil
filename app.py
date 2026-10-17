@@ -90,17 +90,17 @@ def registrar_usuario_db(identificador, clave):
     return exito
 
 def verificar_usuario_db(identificador, clave):
-    """Mapea con total exactitud los índices posicionales individuales de la tupla de SQLite."""
+    """Mapea con total exactitud los índices posicionales individuales de la tupla de SQLite para evitar bloqueos."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT clave, hogar_id, es_propietario, pin FROM usuarios WHERE identificador = ?", (identificador,))
     resultado = cursor.fetchone()
     conn.close()
-    if resultado and resultado == clave:
+    if resultado and resultado[0] == clave:
         return {
-            "hogar_id": resultado,
-            "es_propietario": resultado,
-            "pin": resultado
+            "hogar_id": resultado[1],
+            "es_propietario": resultado[2],
+            "pin": resultado[3]
         }
     return None
 
@@ -126,7 +126,7 @@ def obtener_codigo_activo_db(hogar_id):
     cursor.execute("SELECT codigo FROM codigos_invitacion WHERE hogar_id = ?", (hogar_id,))
     fila = cursor.fetchone()
     conn.close()
-    return fila if fila else None
+    return fila[0] if fila else None
 
 def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
     conn = sqlite3.connect(RUTA_DB)
@@ -134,7 +134,7 @@ def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
     cursor.execute("SELECT hogar_id FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
     resultado = cursor.fetchone()
     if resultado:
-        hogar_destino = resultado
+        hogar_destino = resultado[0]
         cursor.execute("UPDATE usuarios SET hogar_id = ?, es_propietario = 0 WHERE identificador = ?", (hogar_destino, usuario_id))
         cursor.execute("DELETE FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
         conn.commit()
@@ -170,7 +170,7 @@ def abonar_a_meta_db(meta_id, monto):
     cursor.execute("SELECT monto_actual, monto_objetivo FROM metas_ahorro WHERE id = ?", (meta_id,))
     res = cursor.fetchone()
     if res:
-        monto_actual, monto_objetivo = res, res
+        monto_actual, monto_objetivo = res[0], res[1]
         nuevo_monto = monto_actual + monto
         completado = 1 if nuevo_monto >= monto_objetivo else 0
         cursor.execute("UPDATE metas_ahorro SET monto_actual = ?, completado = ? WHERE id = ?", (nuevo_monto, completado, meta_id))
@@ -244,7 +244,7 @@ def obtener_meses_historicos(hogar_id):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE hogar_id = ? ORDER BY id DESC", (hogar_id,))
-    meses = [fila for fila in cursor.fetchall()]
+    meses = [fila[0] for fila in cursor.fetchall()]
     conn.close()
     return meses
 
@@ -282,7 +282,7 @@ if not st.session_state["cuenta_usuario"]:
             if res:
                 st.session_state["cuenta_usuario"] = u_input
                 st.session_state["hogar_id"] = res["hogar_id"]
-                st.session_state["es_propietario"] = True if res["es_propietario"] == 1 else False
+                st.session_state["es_propietario"] = res["es_propietario"]
                 st.session_state["pin_usuario"] = res["pin"]
                 st.rerun()
             else:
@@ -391,7 +391,7 @@ with tab_metas:
         else:
             st.caption("Aún no tienen logros guardados. ¡Completen su primera meta de ahorro para ganar una medalla!")
     else:
-        st.caption("No hay metas configuradas in este hogar.")
+        st.caption("No hay metas configuradas en este hogar.")
 with tab_cuentas:
     col_mes, col_ano = st.columns(2)
     with col_mes:
@@ -417,7 +417,7 @@ with tab_cuentas:
 
     saldos_db = obtener_todos_los_saldos(hogar_actual)
     total_ingresos = 0.0
-    ingresos_existentes = [row for row in saldos_db if row == "Ingreso"]
+    ingresos_existentes = [row for row in saldos_db if row[2] == "Ingreso"]
 
     for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
         col_ing_txt, col_ing_del = st.columns([0.85, 0.15])
@@ -453,7 +453,7 @@ with tab_cuentas:
     with col_add:
         st.text_input("Añadir nuevo concepto de gasto:", key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
     with col_del:
-        gastos_existentes = [row for row in saldos_db if row == "Gasto"]
+        gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
         st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
 
     st.markdown("#### Valores del Periodo")
@@ -518,7 +518,7 @@ with tab_cuentas:
                 texto_item = f"{k} ({porcentaje_calc:.1f}% - {monto_formateado})"
                 etiquetas_leyenda.append(texto_item)
             
-            # SOLUCIÓN MÁXIMA: Forzamos a convertir el objeto gráfico en una lista nativa pura para evitar colapsos con 1 solo gasto
+            # Forzamos a convertir las cuñas en una lista nativa pura para evitar colapsos con 1 solo gasto
             ax2.legend(handles=list(wedges), labels=etiquetas_leyenda, title="Conceptos de Egreso", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1),
                        facecolor='#1E222A', edgecolor='#31333F', textprops=dict(color='#E1E4E6', fontsize=9))
             ax2.set_title("Distribución de Egresos", color="#E1E4E6", fontsize=12, fontweight="bold", pad=15)
