@@ -1,4 +1,4 @@
-import streamlit st
+import streamlit as st
 import sqlite3
 import os
 import pandas as pd
@@ -9,11 +9,13 @@ import string
 
 st.set_page_config(page_title="Control Financiero Familiar", page_icon="💰", layout="centered")
 
+# RUTA DE ARCHIVOS DE LA APLICACIÓN
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
 RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v4.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
 
 def es_correo_valido(correo):
+    """Verifica si la estructura corresponde a un correo real."""
     patron = r'^[\w\.-]+@[\w\.-]+\.\w+$'
     return re.match(patron, correo) is not None
 
@@ -24,6 +26,7 @@ def generar_string_aleatorio():
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
+    # Almacenamos el identificador del usuario, su clave, su hogar_id actual y su rol
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             identificador TEXT PRIMARY KEY,
@@ -32,12 +35,14 @@ def inicializar_db():
             es_propietario INTEGER NOT NULL DEFAULT 1
         )
     """)
+    # Tabla temporal para almacenar los códigos activos de uso único
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS codigos_invitacion (
             hogar_id TEXT PRIMARY KEY,
             codigo TEXT NOT NULL UNIQUE
         )
     """)
+    # Las cuentas operativas se guardan indexadas por el hogar compartido
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             hogar_id TEXT,
@@ -47,6 +52,7 @@ def inicializar_db():
             PRIMARY KEY (hogar_id, item)
         )
     """)
+    # El histórico se archiva bajo el hogar compartido
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,10 +81,9 @@ def registrar_usuario_db(identificador, clave):
     return exito
 
 def verificar_usuario_db(identificador, clave):
-    """Función Corregida: Extrae y valida todos los campos necesarios del perfil."""
+    """Extrae y valida todos los campos necesarios del perfil."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    # Se añaden hogar_id y es_propietario a la consulta SQL
     cursor.execute("SELECT clave, hogar_id, es_propietario FROM usuarios WHERE identificador = ?", (identificador,))
     resultado = cursor.fetchone()
     conn.close()
@@ -91,6 +96,7 @@ def verificar_usuario_db(identificador, clave):
     return None
 
 def solicitar_nuevo_codigo_db(hogar_id):
+    """Genera o renueva un código aleatorio único en la DB para este hogar."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     nuevo_codigo = generar_string_aleatorio()
@@ -108,6 +114,7 @@ def obtener_codigo_activo_db(hogar_id):
     return fila[0] if fila else None
 
 def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
+    """Asigna al usuario al nuevo hogar y destruye el código de inmediato."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT hogar_id FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
@@ -115,7 +122,9 @@ def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
     
     if resultado:
         hogar_destino = resultado[0]
+        # Actualizamos el hogar de la persona invitada y cambiamos su rol a miembro (0)
         cursor.execute("UPDATE usuarios SET hogar_id = ?, es_propietario = 0 WHERE identificador = ?", (hogar_destino, usuario_id))
+        # Destruimos el código usado para que nadie más lo use
         cursor.execute("DELETE FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
         conn.commit()
         exito = True
@@ -201,7 +210,7 @@ def formatear_clp(monto):
     return formato_numero if monto >= 0 else f"-{formato_numero}"
 
 inicializar_db()
-# --- INTERFAZ VISUAL ---
+# --- INTERFAZ VISUAL DE REGISTRO E INICIO DE SESIÓN ---
 st.title("📱 Sistema Financiero Familiar Compartido")
 
 if "sesion_activa" not in st.session_state:
@@ -262,11 +271,11 @@ es_propietario = st.session_state["es_propietario"]
 
 st.info(f"👤 Cuenta activa: **{usuario_logueado}**")
 
-# PANEL DE CONTROL DE INVITACIONES EN LA PANTALLA PRINCIPAL
+# PANEL DINÁMICO DE CONTROL DE INVITACIONES (PANTALLA PRINCIPAL VISIBLE)
 st.markdown("### 👥 Panel de Miembros Compartidos")
 
 if es_propietario:
-    with st.expander("✉️ Secciones de Invitación Exclusiva (Propietario)"):
+    with st.expander("✉️ Secciones de Invitación Exclusiva (Propietario)", expanded=True):
         st.write("Como propietario, puedes generar un código aleatorio único para invitar a otra persona.")
         
         codigo_actual_db = obtener_codigo_activo_db(hogar_actual)
@@ -282,7 +291,7 @@ if es_propietario:
             st.success("¡Se ha generado un nuevo código de uso único!")
             st.rerun()
 else:
-    with st.expander("🔗 Unirse a otro panel familiar"):
+    with st.expander("🔗 Unirse a otro panel familiar", expanded=True):
         codigo_ingresado = st.text_input("Ingresa un código de invitación recibido:", placeholder="Ej: INV-X83A").strip().upper()
         if st.button("Confirmar Vinculación de Cuentas", use_container_width=True):
             if codigo_ingresado:
