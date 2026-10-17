@@ -7,8 +7,10 @@ import re  # Módulo nativo para validación por expresiones regulares
 
 st.set_page_config(page_title="Control Financiero Vinculado", page_icon="💰", layout="centered")
 
+# RUTA DE ARCHIVOS DE LA APLICACIÓN
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
-RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_dinamico.db")
+# Usamos la versión v2 para resolver el conflicto de tablas antiguas en la nube
+RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v2.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
 
 def es_correo_valido(correo):
@@ -19,12 +21,14 @@ def es_correo_valido(correo):
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
+    # Tabla de credenciales de usuario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             identificador TEXT PRIMARY KEY,
             clave TEXT NOT NULL
         )
     """)
+    # Tabla de saldos modificada para incluir al usuario propietario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             usuario_id TEXT,
@@ -34,6 +38,7 @@ def inicializar_db():
             PRIMARY KEY (usuario_id, item)
         )
     """)
+    # Tabla histórica modificada para incluir al usuario propietario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,6 +152,7 @@ def formatear_clp(monto):
     return formato_numero if monto >= 0 else f"-{formato_numero}"
 
 inicializar_db()
+# --- INTERFAZ VISUAL ---
 st.title("📱 Sistema Financiero Personalizado")
 
 if "sesion_activa" not in st.session_state:
@@ -183,7 +189,7 @@ if not st.session_state["sesion_activa"]:
         if st.button("🚀 Crear y Vincular Cuenta", use_container_width=True):
             user_reg_clean = nuevo_usuario.strip().lower()
             if user_reg_clean and nueva_clave.strip():
-                # Validación estricta antes de escribir en la Base de Datos
+                # Validación estricta de correo real antes de guardar en SQLite
                 if es_correo_valido(user_reg_clean):
                     if registrar_usuario_db(user_reg_clean, nueva_clave.strip()):
                         st.success("¡Cuenta vinculada con éxito! Ya puedes iniciar sesión desde la primera pestaña.")
@@ -227,7 +233,7 @@ with st.expander("👥 Añadir casilla para sueldos compartidos"):
 saldos_db = obtener_todos_los_saldos(usuario_logueado)
 
 total_ingresos = 0.0
-# Corrección de la validación del elemento indexado en la tupla
+# Filtrado preciso inspeccionando la estructura correcta de la tupla (elemento en la posición 2)
 ingresos_existentes = [row for row in saldos_db if row[2] == "Ingreso"]
 
 for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
