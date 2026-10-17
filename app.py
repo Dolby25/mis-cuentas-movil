@@ -122,15 +122,24 @@ def formatear_clp(monto):
     valor_absoluto = int(round(abs(monto)))
     formato_numero = f"${valor_absoluto:,}".replace(",", ".")
     return formato_numero if monto >= 0 else f"-{formato_numero}"
+
+def limpiar_y_convertir_monto(texto_monto):
+    texto_limpio = texto_monto.replace("$", "").replace(".", "").strip()
+    if not texto_limpio:
+        return 0.0
+    try:
+        return float(texto_limpio)
+    except ValueError:
+        return 0.0
 inicializar_db()
 
 st.title("📱 Control Financiero Móvil")
 
-st.subheader("👤 Identificación de Usuario")
-usuario_app = st.text_input("Usuario Activo:", value="Francisco")
-st.write(f"Bienvenido/a al sistema, **{usuario_app}**")
-st.markdown("---")
+# Modificación solicitada: Mensaje limpio y espera a que el usuario se identifique libremente
+st.subheader("👤 Bienvenido al sistema")
+usuario_app = st.text_input("Ingrese su nombre para comenzar:", value="", placeholder="Escriba su nombre aquí...")
 
+st.markdown("---")
 st.subheader("📅 Periodo Contable Activo")
 col_mes, col_ano = st.columns(2)
 with col_mes:
@@ -141,18 +150,30 @@ periodo_completo = f"{mes_sel} {ano_sel}"
 
 st.markdown("### 📥 Ingresos Consolidados")
 saldos_db = obtener_todos_los_saldos()
-nombre_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), "Ingresos Principales")
-monto_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), 0.0)
+nombre_ingreso_inicial = next((row[0] for row in saldos_db if row[2] == "Ingreso"), "Ingresos Principales")
+monto_ingreso_inicial = next((row[1] for row in saldos_db if row[2] == "Ingreso"), 0.0)
 
 nuevo_nombre_ingreso = st.text_input("Concepto de Ingreso:", value=nombre_ingreso_inicial)
 if nuevo_nombre_ingreso != nombre_ingreso_inicial and nuevo_nombre_ingreso.strip():
     cambiar_nombre_ingreso_db(nombre_ingreso_inicial, nuevo_nombre_ingreso.strip())
     st.rerun()
 
-monto_ingreso = st.number_input(f"Monto {nuevo_nombre_ingreso} ($):", min_value=0.0, value=float(monto_ingreso_inicial), step=1000.0)
-if monto_ingreso != monto_ingreso_inicial:
-    actualizar_monto_db(nuevo_nombre_ingreso, monto_ingreso)
+# Entrada inteligente en pesos chilenos que aplica puntos dinámicamente mientras el usuario escribe
+monto_inicial_formateado = f"{int(monto_ingreso_inicial):,}".replace(",", ".") if monto_ingreso_inicial > 0 else ""
+ingreso_input_text = st.text_input(f"Monto {nuevo_nombre_ingreso} (CLP $):", value=monto_inicial_formateado, placeholder="Ej: 1.500.000")
+
+# Formatear el texto dinámicamente con puntos chilenos
+ingreso_procesado = limpiar_y_convertir_monto(ingreso_input_text)
+texto_formateado_ingreso = f"{int(ingreso_procesado):,}".replace(",", ".") if ingreso_procesado > 0 else ""
+
+if texto_formateado_ingreso != ingreso_input_text and ingreso_input_text != "":
+    actualizar_monto_db(nuevo_nombre_ingreso, ingreso_procesado)
     st.rerun()
+elif ingreso_input_text == "" and monto_ingreso_inicial != 0.0:
+    actualizar_monto_db(nuevo_nombre_ingreso, 0.0)
+    st.rerun()
+
+monto_ingreso = ingreso_procesado
 st.markdown("---")
 st.markdown("### 💸 Controles Operativos de Gastos")
 
@@ -173,7 +194,7 @@ with col_add:
             st.warning("Escribe un nombre válido.")
 
 with col_del:
-    gastos_existentes = [row for row in saldos_db if row == "Gasto"]
+    gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
     gasto_a_eliminar = st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes)
     if st.button("🗑️ Eliminar Gasto", use_container_width=True):
         if gasto_a_eliminar != "Seleccione...":
@@ -188,13 +209,22 @@ gastos_filtrados = {}
 
 for item, valor, tipo in saldos_db:
     if tipo == "Gasto":
-        monto_g = st.number_input(f"Monto {item} ($):", min_value=0.0, value=float(valor), step=1000.0, key=f"gasto_{item}")
-        if monto_g != valor:
-            actualizar_monto_db(item, monto_g)
+        valor_inicial_formateado = f"{int(valor):,}".replace(",", ".") if valor > 0 else ""
+        gasto_input_text = st.text_input(f"Monto {item} (CLP $):", value=valor_inicial_formateado, key=f"gasto_input_{item}", placeholder="Ej: 45.000")
+        
+        gasto_procesado = limpiar_y_convertir_monto(gasto_input_text)
+        texto_formateado_gasto = f"{int(gasto_procesado):,}".replace(",", ".") if gasto_procesado > 0 else ""
+        
+        if texto_formateado_gasto != gasto_input_text and gasto_input_text != "":
+            actualizar_monto_db(item, gasto_procesado)
             st.rerun()
-        total_gastos += monto_g
-        if monto_g > 0:
-            gastos_filtrados[item] = monto_g
+        elif gasto_input_text == "" and valor != 0.0:
+            actualizar_monto_db(item, 0.0)
+            st.rerun()
+            
+        total_gastos += gasto_procesado
+        if gasto_procesado > 0:
+            gastos_filtrados[item] = gasto_procesado
 
 saldo_disponible = total_ingresos - total_gastos
 st.markdown("---")
@@ -240,7 +270,7 @@ if st.button("🗄️ Archivar Periodo y Actualizar Excel", use_container_width=
 
 st.subheader("📁 Periodos Consolidados")
 meses_hist = obtener_meses_historicos()
-mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m for m in meses_hist])
+mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m[0] for m in meses_hist])
 
 if mes_hist_sel != "Seleccione...":
     conn = sqlite3.connect(RUTA_DB)
