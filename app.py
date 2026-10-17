@@ -128,7 +128,7 @@ def obtener_codigo_activo_db(hogar_id):
     conn.close()
     return fila[0] if fila else None
 
-def nlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
+def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT hogar_id FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
@@ -282,7 +282,7 @@ if not st.session_state["cuenta_usuario"]:
             if res:
                 st.session_state["cuenta_usuario"] = u_input
                 st.session_state["hogar_id"] = res["hogar_id"]
-                st.session_state["es_propietario"] = True if res["es_propietario"] == 1 else False
+                st.session_state["es_propietario"] = res["es_propietario"]
                 st.session_state["pin_usuario"] = res["pin"]
                 st.rerun()
             else:
@@ -507,11 +507,12 @@ with tab_cuentas:
                      matrimonial_formatear_clp(yval), ha='center', va='bottom', color='#E1E4E6', fontsize=10, fontweight="bold")
         
         if gastos_filtrados:
-            wedges, texts = ax2.pie(gastos_filtrados.values(), wedgeprops=dict(width=0.4, edgecolor='#0E1117', linewidth=2), 
-                                    startangle=90, colors=['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'])
+            # Corrección de Leyenda: Se inyectan las cuñas explícitamente en el parámetro handles para evitar el TypeError
+            wedges, texts = ax2.pie(gastos_filtrados.values(), wedgeprops=dict(width=0.4, edgecolor='#0E1117', linewidth=2), startangle=90, colors=['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'])
             total_g = sum(gastos_filtrados.values())
             etiquetas_leyenda = [f"{k} ({v/total_g*100:.1f}% - {matrimonial_formatear_clp(v)})" for k, v in gastos_filtrados.items()]
-            ax2.legend(wedges, etiquetas_leyenda, title="Conceptos de Egreso", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1),
+            
+            ax2.legend(handles=wedges, labels=etiquetas_leyenda, title="Conceptos de Egreso", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1),
                        facecolor='#1E222A', edgecolor='#31333F', textprops=dict(color='#E1E4E6', fontsize=9))
             ax2.set_title("Distribución de Egresos", color="#E1E4E6", fontsize=12, fontweight="bold", pad=15)
         else:
@@ -554,7 +555,7 @@ with tab_miembros:
         cod_ing = st.text_input("Introduce el código de invitación (Ej: INV-A1B2):", placeholder="INV-XXXX", key="p3_token").strip().upper()
         if st.button("Confirmar Vinculación", use_container_width=True, key="p3_btn_token"):
             if cod_ing:
-                if nlazar_y_quemar_codigo_db(usuario_logueado, cod_ing):
+                if enlazar_y_quemar_codigo_db(usuario_logueado, cod_ing):
                     st.success("¡Cuentas enlazadas de forma correcta!")
                     st.session_state["pin_desbloqueado"] = False
                     st.rerun()
