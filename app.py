@@ -149,8 +149,8 @@ periodo_completo = f"{mes_sel} {ano_sel}"
 
 st.markdown("### 📥 Ingresos Consolidados")
 saldos_db = obtener_todos_los_saldos()
-nombre_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), "Ingresos Principales")
-monto_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), 0.0)
+nombre_ingreso_inicial = next((row for row in saldos_db if row[2] == "Ingreso"), "Ingresos Principales")
+monto_ingreso_inicial = next((row for row in saldos_db if row[2] == "Ingreso"), 0.0)
 
 nuevo_nombre_ingreso = st.text_input("Concepto de Ingreso:", value=nombre_ingreso_inicial)
 if nuevo_nombre_ingreso != nombre_ingreso_inicial and nuevo_nombre_ingreso.strip():
@@ -177,33 +177,35 @@ st.markdown("### 💸 Controles Operativos de Gastos")
 if "gasto_texto_tmp" not in st.session_state:
     st.session_state["gasto_texto_tmp"] = ""
 
+# Funciones de ejecución inmediata antes de re-renderizar la pantalla
+def ejecutar_alta_gasto():
+    texto_alta = st.session_state["campo_alta_gasto"].strip()
+    if texto_alta:
+        if texto_alta != nuevo_nombre_ingreso:
+            if insertar_nuevo_item_db(texto_alta, "Gasto"):
+                st.session_state["gasto_texto_tmp"] = ""
+                st.toast(f"'{texto_alta}' agregado.", icon="➕")
+            else:
+                st.error("Este ítem de gasto ya se encuentra registrado.")
+        else:
+            st.error("El nombre coincide con la casilla activa de ingresos.")
+
+def ejecutar_baja_gasto():
+    target_baja = st.session_state["selector_baja_gasto"]
+    if target_baja != "Seleccione...":
+        eliminar_gasto_db(target_baja)
+        st.toast(f"'{target_baja}' eliminado.", icon="🗑️")
+
 col_add, col_del = st.columns(2)
 
 with col_add:
-    nuevo_gasto = st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], placeholder="Ej: Supermercado")
-    if st.button("➕ Añadir Gasto", use_container_width=True):
-        if nuevo_gasto.strip():
-            if nuevo_gasto.strip() != nuevo_nombre_ingreso:
-                if insertar_nuevo_item_db(nuevo_gasto.strip(), "Gasto"):
-                    st.session_state["gasto_texto_tmp"] = ""
-                    st.success(f"'{nuevo_gasto.strip()}' agregado exitosamente.")
-                    st.rerun()
-                else:
-                    st.error("Este ítem de gasto ya se encuentra registrado.")
-            else:
-                st.error("El nombre coincide con la casilla activa de ingresos.")
-        else:
-            st.warning("Por favor, escriba un nombre de concepto válido.")
+    st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
+    st.button("➕ Añadir Gasto", use_container_width=True)
 
 with col_del:
-    gastos_existentes = [row for row in saldos_db if row == "Gasto"]
-    # Agregar una llave explícita estabiliza el componente al remover ítems
-    gasto_a_eliminar = st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_borrar_gasto")
-    if st.button("🗑️ Eliminar Gasto", use_container_width=True):
-        if gasto_a_eliminar != "Seleccione...":
-            eliminar_gasto_db(gasto_a_eliminar)
-            st.success(f"'{gasto_a_eliminar}' eliminado exitosamente.")
-            st.rerun()
+    gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
+    st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
+    st.button("🗑️ Eliminar Gasto", use_container_width=True)
 
 st.markdown("#### Valores del Periodo")
 total_ingresos = monto_ingreso
@@ -281,5 +283,6 @@ if mes_hist_sel != "Seleccione...":
     conn.close()
     df_resumen['Monto'] = df_resumen['Monto'].apply(formatear_clp)
     st.dataframe(df_resumen, use_container_width=True)
+
 
 
