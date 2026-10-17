@@ -135,7 +135,6 @@ inicializar_db()
 
 st.title("📱 Control Financiero Móvil")
 
-# Modificación solicitada: Mensaje limpio y espera a que el usuario se identifique libremente
 st.subheader("👤 Bienvenido al sistema")
 usuario_app = st.text_input("Ingrese su nombre para comenzar:", value="", placeholder="Escriba su nombre aquí...")
 
@@ -150,19 +149,17 @@ periodo_completo = f"{mes_sel} {ano_sel}"
 
 st.markdown("### 📥 Ingresos Consolidados")
 saldos_db = obtener_todos_los_saldos()
-nombre_ingreso_inicial = next((row[0] for row in saldos_db if row[2] == "Ingreso"), "Ingresos Principales")
-monto_ingreso_inicial = next((row[1] for row in saldos_db if row[2] == "Ingreso"), 0.0)
+nombre_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), "Ingresos Principales")
+monto_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), 0.0)
 
 nuevo_nombre_ingreso = st.text_input("Concepto de Ingreso:", value=nombre_ingreso_inicial)
 if nuevo_nombre_ingreso != nombre_ingreso_inicial and nuevo_nombre_ingreso.strip():
     cambiar_nombre_ingreso_db(nombre_ingreso_inicial, nuevo_nombre_ingreso.strip())
     st.rerun()
 
-# Entrada inteligente en pesos chilenos que aplica puntos dinámicamente mientras el usuario escribe
 monto_inicial_formateado = f"{int(monto_ingreso_inicial):,}".replace(",", ".") if monto_ingreso_inicial > 0 else ""
 ingreso_input_text = st.text_input(f"Monto {nuevo_nombre_ingreso} (CLP $):", value=monto_inicial_formateado, placeholder="Ej: 1.500.000")
 
-# Formatear el texto dinámicamente con puntos chilenos
 ingreso_procesado = limpiar_y_convertir_monto(ingreso_input_text)
 texto_formateado_ingreso = f"{int(ingreso_procesado):,}".replace(",", ".") if ingreso_procesado > 0 else ""
 
@@ -177,30 +174,39 @@ monto_ingreso = ingreso_procesado
 st.markdown("---")
 st.markdown("### 💸 Controles Operativos de Gastos")
 
-col_add, col_del = st.columns(2)
-with col_add:
-    nuevo_gasto = st.text_input("Añadir nuevo concepto de gasto:")
-    if st.button("➕ Añadir Gasto", use_container_width=True):
-        if nuevo_gasto.strip():
-            if nuevo_gasto.strip() != nuevo_nombre_ingreso:
-                if insertar_nuevo_item_db(nuevo_gasto.strip(), "Gasto"):
-                    st.success(f"'{nuevo_gasto}' agregado.")
-                    st.rerun()
-                else:
-                    st.error("Este ítem ya existe.")
-            else:
-                st.error("El nombre coincide con la casilla de ingresos.")
-        else:
-            st.warning("Escribe un nombre válido.")
+# Formulario aislado para evitar recargas automáticas destructivas al escribir letras
+with st.form("formulario_gestion_gastos", clear_on_submit=True):
+    col_add, col_del = st.columns(2)
+    with col_add:
+        nuevo_gasto = st.text_input("Añadir nuevo concepto de gasto:", placeholder="Ej: Supermercado")
+    with col_del:
+        gastos_existentes = [row for row in saldos_db if row == "Gasto"]
+        gasto_a_eliminar = st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes)
+        
+    btn_add, btn_del = st.columns(2)
+    with btn_add:
+        submit_add = st.form_submit_button("➕ Añadir Gasto", use_container_width=True)
+    with btn_del:
+        submit_del = st.form_submit_button("🗑️ Eliminar Gasto", use_container_width=True)
 
-with col_del:
-    gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
-    gasto_a_eliminar = st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes)
-    if st.button("🗑️ Eliminar Gasto", use_container_width=True):
-        if gasto_a_eliminar != "Seleccione...":
-            eliminar_gasto_db(gasto_a_eliminar)
-            st.success(f"'{gasto_a_eliminar}' eliminado.")
-            st.rerun()
+if submit_add:
+    if nuevo_gasto.strip():
+        if nuevo_gasto.strip() != nuevo_nombre_ingreso:
+            if insertar_nuevo_item_db(nuevo_gasto.strip(), "Gasto"):
+                st.success(f"'{nuevo_gasto.strip()}' agregado exitosamente.")
+                st.rerun()
+            else:
+                st.error("Este ítem de gasto ya se encuentra registrado.")
+        else:
+            st.error("El nombre coincide con la casilla activa de ingresos.")
+    else:
+        st.warning("Por favor, escriba un nombre de concepto válido.")
+
+if submit_del:
+    if gasto_a_eliminar != "Seleccione...":
+        eliminar_gasto_db(gasto_a_eliminar)
+        st.success(f"'{gasto_a_eliminar}' eliminado exitosamente.")
+        st.rerun()
 
 st.markdown("#### Valores del Periodo")
 total_ingresos = monto_ingreso
@@ -270,7 +276,7 @@ if st.button("🗄️ Archivar Periodo y Actualizar Excel", use_container_width=
 
 st.subheader("📁 Periodos Consolidados")
 meses_hist = obtener_meses_historicos()
-mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m[0] for m in meses_hist])
+mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m for m in meses_hist])
 
 if mes_hist_sel != "Seleccione...":
     conn = sqlite3.connect(RUTA_DB)
