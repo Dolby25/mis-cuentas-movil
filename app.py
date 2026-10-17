@@ -507,10 +507,16 @@ with tab_cuentas:
                      matrimonial_formatear_clp(yval), ha='center', va='bottom', color='#E1E4E6', fontsize=10, fontweight="bold")
         
         if gastos_filtrados:
-            # Corrección de Leyenda: Se inyectan las cuñas explícitamente en el parámetro handles para evitar el TypeError
             wedges, texts = ax2.pie(gastos_filtrados.values(), wedgeprops=dict(width=0.4, edgecolor='#0E1117', linewidth=2), startangle=90, colors=['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'])
             total_g = sum(gastos_filtrados.values())
-            etiquetas_leyenda = [f"{k} ({v/total_g*100:.1f}% - {matrimonial_formatear_clp(v)})" for k, v in gastos_filtrados.items()]
+            
+            # Formateador robusto para la leyenda lateral compatible con Python 3.14
+            etiquetas_leyenda = []
+            for k, v in gastos_filtrados.items():
+                porcentaje_calc = (v / total_g) * 100
+                monto_formateado = matrimonial_formatear_clp(v)
+                texto_item = f"{k} ({porcentaje_calc:.1f}% - {monto_formateado})"
+                etiquetas_leyenda.append(texto_item)
             
             ax2.legend(handles=wedges, labels=etiquetas_leyenda, title="Conceptos de Egreso", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1),
                        facecolor='#1E222A', edgecolor='#31333F', textprops=dict(color='#E1E4E6', fontsize=9))
