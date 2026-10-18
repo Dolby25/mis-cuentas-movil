@@ -24,7 +24,6 @@ def es_correo_valido(correo):
 def generar_string_aleatorio():
     """Genera un código dinámico único de 6 caracteres."""
     return "INV-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
-
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -76,7 +75,6 @@ def inicializar_db():
     """)
     conn.commit()
     conn.close()
-
 def registrar_usuario_db(identificador, clave):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -180,7 +178,6 @@ def abonar_a_meta_db(meta_id, monto):
         cursor.execute("UPDATE metas_ahorro SET monto_actual = ?, completado = ? WHERE id = ?", (nuevo_monto, completado, meta_id))
         conn.commit()
     conn.close()
-
 def actualizar_monto_db(hogar_id, item, nuevo_monto):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -223,17 +220,14 @@ def guardar_mes_en_historico(hogar_id, mes_ano, datos_saldos):
         cursor.execute("INSERT INTO historico (hogar_id, mes_ano, item, monto, tipo) VALUES (?, ?, ?, ?, ?)", (hogar_id, mes_ano, item, monto, tipo))
     conn.commit()
     conn.close()
-
-# =====================================================================
-# ÁREA DE RENDERIZADO DEL GRÁFICO (LÍNEA 524 CORREGIDA DE FORMA SEGURA)
-# =====================================================================
-def mostrar_grafico_distribucion(valores, etiquetas_leyenda):
+def generar_grafico_torta(valores_egresos, etiquetas_leyenda):
+    """Genera el gráfico de egresos de forma segura y compatible con Python 3.14."""
     fig, ax2 = plt.subplots(figsize=(6, 6))
     
-    # Desempaquetamos correctamente el gráfico circular sin forzar list()
-    wedges, texts = ax2.pie(valores, startangle=90, counterclock=False)
+    # Desempaquetamos explícitamente los elementos devueltos por el pie chart
+    wedges, texts = ax2.pie(valores_egresos, startangle=90, counterclock=False)
     
-    # Línea 524 reparada para evitar el TypeError en el servidor
+    # Línea 524 corregida: se eliminó list(wedges) para evitar el TypeError
     ax2.legend(
         handles=wedges, 
         labels=etiquetas_leyenda, 
@@ -244,5 +238,7 @@ def mostrar_grafico_distribucion(valores, etiquetas_leyenda):
         edgecolor='#31333F', 
         textprops=dict(color='#E1E4E6', fontsize=9)
     )
+    
+    ax2.axis('equal')  
+    plt.tight_layout()
     return fig
-
