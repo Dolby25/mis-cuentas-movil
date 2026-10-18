@@ -15,13 +15,13 @@ def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     
-    # Validar y purgar tablas antiguas si tienen columnas incompatibles
-    tablas_a_validar = ["usuarios", "mes_activo", "historico"]
+    # Validar y purgar tablas antiguas si tienen columnas incompatibles de versiones anteriores
+    tablas_a_validar = ["usuarios", "mes_activo", "historico", "metas_ahorro"]
     for tabla in tablas_a_validar:
         cursor.execute(f"PRAGMA table_info({tabla})")
         columnas = [info[1] for info in cursor.fetchall()]
         if len(columnas) > 0:
-            # Si es la tabla usuarios vieja sin contraseña, o tablas viejas sin la columna email, las borramos
+            # Validar si falta la contraseña en usuarios o el correo en las demás tablas para reiniciarlas
             if (tabla == "usuarios" and "password" not in columnas) or (tabla != "usuarios" and "email" not in columnas):
                 cursor.execute(f"DROP TABLE {tabla}")
                 
@@ -57,7 +57,7 @@ def inicializar_db():
         )
     """)
     
-    # 4. Tabla de Metas de Ahorro
+    # 4. Tabla de Metas de Ahorro Multi-Usuario Corregida
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metas_ahorro (
             email TEXT,
@@ -160,7 +160,7 @@ def obtener_meses_historicos(email):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE email = ? ORDER BY id DESC", (email,))
-    meses = [fila[0] for fila in cursor.fetchall()]
+    meses = [fila for fila in cursor.fetchall()]
     conn.close()
     return meses
 
