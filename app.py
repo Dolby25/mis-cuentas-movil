@@ -15,17 +15,14 @@ def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     
-    # Validar y purgar tablas antiguas si tienen columnas incompatibles de versiones anteriores
     tablas_a_validar = ["usuarios", "mes_activo", "historico", "metas_ahorro"]
     for tabla in tablas_a_validar:
         cursor.execute(f"PRAGMA table_info({tabla})")
-        columnas = [info[1] for info in cursor.fetchall()]
+        columnas = [info for info in cursor.fetchall()]
         if len(columnas) > 0:
-            # Validar si falta la contraseña en usuarios o el correo en las demás tablas para reiniciarlas
             if (tabla == "usuarios" and "password" not in columnas) or (tabla != "usuarios" and "email" not in columnas):
                 cursor.execute(f"DROP TABLE {tabla}")
                 
-    # 1. Tabla Maestra de Usuarios Limpia
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             email TEXT PRIMARY KEY,
@@ -33,8 +30,6 @@ def inicializar_db():
             pin TEXT NOT NULL
         )
     """)
-    
-    # 2. Tabla de Mes Activo Multi-Usuario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             email TEXT,
@@ -44,8 +39,6 @@ def inicializar_db():
             PRIMARY KEY (email, item)
         )
     """)
-    
-    # 3. Histórico Contable Multi-Usuario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,8 +49,6 @@ def inicializar_db():
             tipo TEXT NOT NULL DEFAULT 'Gasto'
         )
     """)
-    
-    # 4. Tabla de Metas de Ahorro Multi-Usuario Corregida
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metas_ahorro (
             email TEXT,
@@ -117,7 +108,7 @@ def obtener_todos_los_saldos(email):
     datos = cursor.fetchall()
     conn.close()
     
-    tiene_ingreso = any(row[2] == "Ingreso" for row in datos)
+    tiene_ingreso = any(row == "Ingreso" for row in datos)
     if not tiene_ingreso:
         conn = sqlite3.connect(RUTA_DB)
         cursor = conn.cursor()
@@ -212,7 +203,7 @@ if not st.session_state["doble_factor_ok"]:
             if st.button("🚪 Entrar al Sistema", use_container_width=True):
                 if email_input and password_input:
                     cuenta = buscar_usuario(email_input)
-                    if cuenta and cuenta[1] == password_input:
+                    if cuenta and cuenta == password_input:
                         st.session_state["usuario_conectado"] = email_input
                         st.session_state["primer_filtro_ok"] = True
                         st.rerun()
@@ -245,8 +236,8 @@ if not st.session_state["doble_factor_ok"]:
         st.write(f"Usuario activo: `{st.session_state['usuario_conectado']}`")
         pin_ingresado = st.text_input("Código PIN de 4 dígitos:", type="password", max_chars=4, placeholder="••••")
         
-        if st.button("🔓 Desbloquear Cuentas", use_container_width=True) or (len(pin_ingresado) == 4 and pin_ingresado == cuenta_maestra[2]):
-            if pin_ingresado == cuenta_maestra[2]:
+        if st.button("🔓 Desbloquear Cuentas", use_container_width=True) or (len(pin_ingresado) == 4 and pin_ingresado == cuenta_maestra):
+            if pin_ingresado == cuenta_maestra:
                 st.session_state["doble_factor_ok"] = True
                 st.rerun()
             elif len(pin_ingresado) == 4:
@@ -276,26 +267,26 @@ with tab_periodo:
 
     st.markdown("### 📥 Ingresos Consolidados")
     saldos_db = obtener_todos_los_saldos(user_email)
-    nombre_ingreso_inicial = next((row[0] for row in saldos_db if row[2] == "Ingreso"), "Ingresos Principales")
-    monto_ingreso_inicial = next((row[1] for row in saldos_db if row[2] == "Ingreso"), 0.0)
+    nombre_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), "Ingresos Principales")
+    monto_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), 0.0)
 
     nuevo_nombre_ingreso = st.text_input("Concepto de Ingreso:", value=nombre_ingreso_inicial)
     if nuevo_nombre_ingreso != nombre_ingreso_inicial and nuevo_nombre_ingreso.strip():
         cambiar_nombre_ingreso_db(user_email, nombre_ingreso_inicial, nuevo_nombre_ingreso.strip())
         st.rerun()
 
-    monto_inicial_formateado = f"{int(monto_ingreso_inicial):,}".replace(",", ".") if monto_ingreso_inicial > 0 else ""
-    ingreso_input_text = st.text_input(f"Monto {nuevo_nombre_ingreso} (CLP \$):", value=monto_inicial_formateado, placeholder="Ej: 1.500.000")
-    ingreso_procesado = limpiar_y_convertir_monto(ingreso_input_text)
-    
-    if f"{int(ingreso_procesado):,}".replace(",", ".") != ingreso_input_text and ingreso_input_text != "":
-        actualizar_monto_db(user_email, nuevo_nombre_ingreso, ingreso_procesado)
-        st.rerun()
-    elif ingreso_input_text == "" and monto_ingreso_inicial != 0.0:
-        actualizar_monto_db(user_email, nuevo_nombre_ingreso, 0.0)
-        st.rerun()
+    # Callbacks dedicados para guardar montos antes del renderizado visual
+    def procesar_cambio_ingreso():
+        texto_ing = st.session_state["campo_ingreso_dinamico"]
+        valor_ing = limpiar_y_convertir_monto(texto_ing)
+        actualizar_monto_db(user_email, nuevo_nombre_ingreso, valor_ing)
 
-    monto_ingreso = ingreso_procesado
+    monto_inicial_formateado = f"{int(monto_ingreso_inicial):,}".replace(",", ".") if monto_ingreso_inicial > 0 else ""
+    st.text_input(f"Monto {nuevo_nombre_ingreso} (CLP \$):", value=monto_inicial_formateado, key="campo_ingreso_dinamico", placeholder="Ej: 1.500.000", on_change=procesar_cambio_ingreso)
+    
+    # Recargar los saldos reales post-guardado
+    saldos_db = obtener_todos_los_saldos(user_email)
+    monto_ingreso = next((row for row in saldos_db if row == "Ingreso"), 0.0)
 
     st.markdown("---")
     st.markdown("### 💸 Controles Operativos de Gastos")
@@ -321,7 +312,7 @@ with tab_periodo:
         st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
         st.button("➕ Añadir Gasto", use_container_width=True)
     with col_del:
-        gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
+        gastos_existentes = [row for row in saldos_db if row == "Gasto"]
         st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
         st.button("🗑️ Eliminar Gasto", use_container_width=True)
 
@@ -330,22 +321,20 @@ with tab_periodo:
     total_gastos = 0.0
     gastos_filtrados = {}
 
+    # Función Callback maestra para registrar los gastos de forma instantánea y estable
+    def procesar_cambio_gasto(item_gasto):
+        texto_g = st.session_state[f"gasto_input_{item_gasto}"]
+        valor_g = limpiar_y_convertir_monto(texto_g)
+        actualizar_monto_db(user_email, item_gasto, valor_g)
+
     for item, valor, tipo in saldos_db:
         if tipo == "Gasto":
             valor_inicial_formateado = f"{int(valor):,}".replace(",", ".") if valor > 0 else ""
-            gasto_input_text = st.text_input(f"Monto {item} (CLP \$):", value=valor_inicial_formateado, key=f"gasto_input_{item}", placeholder="Ej: 45.000")
-            gasto_procesado = limpiar_y_convertir_monto(gasto_input_text)
+            st.text_input(f"Monto {item} (CLP \$):", value=valor_inicial_formateado, key=f"gasto_input_{item}", placeholder="Ej: 45.000", on_change=procesar_cambio_gasto, args=(item,))
             
-            if f"{int(gasto_procesado):,}".replace(",", ".") != gasto_input_text and gasto_input_text != "":
-                actualizar_monto_db(user_email, item, gasto_procesado)
-                st.rerun()
-            elif gasto_input_text == "" and valor != 0.0:
-                actualizar_monto_db(user_email, item, 0.0)
-                st.rerun()
-                
-            total_gastos += gasto_procesado
-            if gasto_procesado > 0:
-                gastos_filtrados[item] = gasto_procesado
+            total_gastos += valor
+            if valor > 0:
+                gastos_filtrados[item] = valor
 
     saldo_disponible = total_ingresos - total_gastos
 with tab_ahorro:
