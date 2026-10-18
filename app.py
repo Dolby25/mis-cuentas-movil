@@ -30,7 +30,6 @@ def inicializar_db():
             tipo TEXT NOT NULL DEFAULT 'Gasto'
         )
     """)
-    # Nueva tabla estratégica para las metas de ahorro con tope de día
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metas_ahorro (
             concepto TEXT PRIMARY KEY,
@@ -39,7 +38,6 @@ def inicializar_db():
             fecha_tope TEXT NOT NULL
         )
     """)
-    # Nueva tabla para resguardar el PIN de seguridad del usuario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS seguridad (
             llave TEXT PRIMARY KEY,
@@ -142,7 +140,6 @@ def limpiar_y_convertir_monto(texto_monto):
     texto_limpio = texto_monto.replace("$", "").replace(".", "").strip()
     return float(texto_limpio) if texto_limpio.isdigit() else 0.0
 
-# Funciones de validación del PIN
 def obtener_pin_seguridad():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -159,7 +156,6 @@ def guardar_nuevo_pin(nuevo_pin):
     conn.close()
 inicializar_db()
 
-# Manejo del estado de autenticación en la sesión actual para recordar al usuario
 if "autenticado" not in st.session_state:
     st.session_state["autenticado"] = False
 
@@ -167,30 +163,22 @@ pin_registrado = obtener_pin_seguridad()
 
 if not st.session_state["autenticado"]:
     st.title("🔒 Acceso Protegido")
-    
     if pin_registrado is None:
         st.subheader("🆕 Crear PIN de Seguridad")
-        st.info("No se ha detectado un código PIN activo en este teléfono. Por favor, crea uno para proteger tus datos financieros.")
+        st.info("Define un código PIN para proteger tus datos financieros en este dispositivo.")
         nuevo_pin_input = st.text_input("Define tu PIN de 4 dígitos:", type="password", max_chars=4)
         confirmar_pin_input = st.text_input("Confirma tu PIN de 4 dígitos:", type="password", max_chars=4)
-        
         if st.button("💾 Guardar PIN y Entrar", use_container_width=True):
-            if len(nuevo_pin_input) == 4 and nuevo_pin_input.isdigit():
-                if nuevo_pin_input == confirmar_pin_input:
-                    guardar_nuevo_pin(nuevo_pin_input)
-                    st.session_state["autenticado"] = True
-                    st.success("¡PIN configurado exitosamente!")
-                    st.rerun()
-                else:
-                    st.error("Los códigos PIN ingresados no coinciden.")
+            if len(nuevo_pin_input) == 4 and nuevo_pin_input.isdigit() and nuevo_pin_input == confirmar_pin_input:
+                guardar_nuevo_pin(nuevo_pin_input)
+                st.session_state["autenticado"] = True
+                st.rerun()
             else:
-                st.error("El PIN debe ser estrictamente numérico de 4 dígitos.")
+                st.error("Verifica que el PIN sea numérico de 4 dígitos y que coincida.")
         st.stop()
-        
     else:
         st.subheader("🔢 Ingrese su PIN de Acceso")
         pin_ingresado = st.text_input("Código PIN:", type="password", max_chars=4, placeholder="••••")
-        
         if st.button("🔓 Desbloquear Aplicación", use_container_width=True) or (len(pin_ingresado) == 4 and pin_ingresado == pin_registrado):
             if pin_ingresado == pin_registrado:
                 st.session_state["autenticado"] = True
@@ -198,180 +186,160 @@ if not st.session_state["autenticado"]:
             elif len(pin_ingresado) == 4:
                 st.error("PIN incorrecto. Inténtelo nuevamente.")
         st.stop()
-# --- INTERFAZ PRINCIPAL DESBLOQUEADA ---
 st.title("📱 Control Financiero Móvil")
-
 st.subheader("👤 Bienvenido al sistema")
 usuario_app = st.text_input("Ingrese su nombre para comenzar:", value="", placeholder="Escriba su nombre aquí...")
-
 st.markdown("---")
-st.subheader("📅 Periodo Contable Activo")
-col_mes, col_ano = st.columns(2)
-with col_mes:
-    mes_sel = st.selectbox("Mes:", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=8)
-with col_ano:
-    ano_sel = st.selectbox("Año:", ["2025", "2026", "2027", "2028"], index=1)
-periodo_completo = f"{mes_sel} {ano_sel}"
 
-st.markdown("### 📥 Ingresos Consolidados")
-saldos_db = obtener_todos_los_saldos()
-nombre_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), "Ingresos Principales")
-monto_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), 0.0)
+# Creación de las pestañas solicitadas para separar el Balance de los Ahorros
+tab_periodo, tab_ahorro = st.tabs(["💰 Control de Periodo", "🎯 Metas de Ahorro"])
 
-nuevo_nombre_ingreso = st.text_input("Concepto de Ingreso:", value=nombre_ingreso_inicial)
-if nuevo_nombre_ingreso != nombre_ingreso_inicial and nuevo_nombre_ingreso.strip():
-    cambiar_nombre_ingreso_db(nombre_ingreso_inicial, nuevo_nombre_ingreso.strip())
-    st.rerun()
+with tab_periodo:
+    st.subheader("📅 Periodo Contable Activo")
+    col_mes, col_ano = st.columns(2)
+    with col_mes:
+        mes_sel = st.selectbox("Mes:", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=8)
+    with col_ano:
+        ano_sel = st.selectbox("Año:", ["2025", "2026", "2027", "2028"], index=1)
+    periodo_completo = f"{mes_sel} {ano_sel}"
 
-monto_inicial_formateado = f"{int(monto_ingreso_inicial):,}".replace(",", ".") if monto_ingreso_inicial > 0 else ""
-ingreso_input_text = st.text_input(f"Monto {nuevo_nombre_ingreso} (CLP $):", value=monto_inicial_formateado, placeholder="Ej: 1.500.000")
+    st.markdown("### 📥 Ingresos Consolidados")
+    saldos_db = obtener_todos_los_saldos()
+    nombre_ingreso_inicial = next((row[0] for row in saldos_db if row[2] == "Ingreso"), "Ingresos Principales")
+    monto_ingreso_inicial = next((row[1] for row in saldos_db if row[2] == "Ingreso"), 0.0)
 
-ingreso_procesado = limpiar_y_convertir_monto(ingreso_input_text)
-texto_formateado_ingreso = f"{int(ingreso_procesado):,}".replace(",", ".") if ingreso_procesado > 0 else ""
+    nuevo_nombre_ingreso = st.text_input("Concepto de Ingreso:", value=nombre_ingreso_inicial)
+    if nuevo_nombre_ingreso != nombre_ingreso_inicial and nuevo_nombre_ingreso.strip():
+        cambiar_nombre_ingreso_db(nombre_ingreso_inicial, nuevo_nombre_ingreso.strip())
+        st.rerun()
 
-if texto_formateado_ingreso != ingreso_input_text and ingreso_input_text != "":
-    actualizar_monto_db(nuevo_nombre_ingreso, ingreso_procesado)
-    st.rerun()
-elif ingreso_input_text == "" and monto_ingreso_inicial != 0.0:
-    actualizar_monto_db(nuevo_nombre_ingreso, 0.0)
-    st.rerun()
+    monto_inicial_formateado = f"{int(monto_ingreso_inicial):,}".replace(",", ".") if monto_ingreso_inicial > 0 else ""
+    ingreso_input_text = st.text_input(f"Monto {nuevo_nombre_ingreso} (CLP $):", value=monto_inicial_formateado, placeholder="Ej: 1.500.000")
+    ingreso_procesado = limpiar_y_convertir_monto(ingreso_input_text)
+    
+    if f"{int(ingreso_procesado):,}".replace(",", ".") != ingreso_input_text and ingreso_input_text != "":
+        actualizar_monto_db(nuevo_nombre_ingreso, ingreso_procesado)
+        st.rerun()
+    elif ingreso_input_text == "" and monto_ingreso_inicial != 0.0:
+        actualizar_monto_db(nuevo_nombre_ingreso, 0.0)
+        st.rerun()
 
-monto_ingreso = ingreso_procesado
+    monto_ingreso = ingreso_procesado
 
-st.markdown("---")
-st.markdown("### 💸 Controles Operativos de Gastos")
+    st.markdown("---")
+    st.markdown("### 💸 Controles Operativos de Gastos")
 
-if "gasto_texto_tmp" not in st.session_state:
-    st.session_state["gasto_texto_tmp"] = ""
+    if "gasto_texto_tmp" not in st.session_state:
+        st.session_state["gasto_texto_tmp"] = ""
 
-def ejecutar_alta_gasto():
-    texto_alta = st.session_state["campo_alta_gasto"].strip()
-    if texto_alta:
-        if texto_alta != nuevo_nombre_ingreso:
+    def ejecutar_alta_gasto():
+        texto_alta = st.session_state["campo_alta_gasto"].strip()
+        if texto_alta and texto_alta != nuevo_nombre_ingreso:
             if insertar_nuevo_item_db(texto_alta, "Gasto"):
                 st.session_state["gasto_texto_tmp"] = ""
                 st.toast(f"'{texto_alta}' agregado.", icon="➕")
-            else:
-                st.error("Este ítem de gasto ya se encuentra registrado.")
-        else:
-            st.error("El nombre coincide con la casilla activa de ingresos.")
 
-def ejecutar_baja_gasto():
-    target_baja = st.session_state["selector_baja_gasto"]
-    if target_baja != "Seleccione...":
-        eliminar_gasto_db(target_baja)
-        st.toast(f"'{target_baja}' eliminado.", icon="🗑️")
+    def ejecutar_baja_gasto():
+        target_baja = st.session_state["selector_baja_gasto"]
+        if target_baja != "Seleccione...":
+            eliminar_gasto_db(target_baja)
+            st.toast(f"'{target_baja}' eliminado.", icon="🗑️")
 
-col_add, col_del = st.columns(2)
-with col_add:
-    st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
-    st.button("➕ Añadir Gasto", use_container_width=True)
-with col_del:
-    gastos_existentes = [row for row in saldos_db if row == "Gasto"]
-    st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
-    st.button("🗑️ Eliminar Gasto", use_container_width=True)
+    col_add, col_del = st.columns(2)
+    with col_add:
+        st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
+        st.button("➕ Añadir Gasto", use_container_width=True)
+    with col_del:
+        gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
+        st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
+        st.button("🗑️ Eliminar Gasto", use_container_width=True)
 
-st.markdown("#### Valores del Periodo")
-total_ingresos = monto_ingreso
-total_gastos = 0.0
-gastos_filtrados = {}
+    st.markdown("#### Valores del Periodo")
+    total_ingresos = monto_ingreso
+    total_gastos = 0.0
+    gastos_filtrados = {}
 
-for item, valor, tipo in saldos_db:
-    if tipo == "Gasto":
-        valor_inicial_formateado = f"{int(valor):,}".replace(",", ".") if valor > 0 else ""
-        gasto_input_text = st.text_input(f"Monto {item} (CLP $):", value=valor_inicial_formateado, key=f"gasto_input_{item}", placeholder="Ej: 45.000")
-        
-        gasto_procesado = limpiar_y_convertir_monto(gasto_input_text)
-        texto_formateado_gasto = f"{int(gasto_procesado):,}".replace(",", ".") if gasto_procesado > 0 else ""
-        
-        if texto_formateado_gasto != gasto_input_text and gasto_input_text != "":
-            actualizar_monto_db(item, gasto_procesado)
-            st.rerun()
-        elif gasto_input_text == "" and valor != 0.0:
-            actualizar_monto_db(item, 0.0)
-            st.rerun()
+    # El renderizado dinámico de los gastos ahora es estable y persistente
+    for item, valor, tipo in saldos_db:
+        if tipo == "Gasto":
+            valor_inicial_formateado = f"{int(valor):,}".replace(",", ".") if valor > 0 else ""
+            gasto_input_text = st.text_input(f"Monto {item} (CLP $):", value=valor_inicial_formateado, key=f"gasto_input_{item}", placeholder="Ej: 45.000")
+            gasto_procesado = limpiar_y_convertir_monto(gasto_input_text)
             
-        total_gastos += gasto_procesado
-        if gasto_procesado > 0:
-            gastos_filtrados[item] = gasto_procesado
+            if f"{int(gasto_procesado):,}".replace(",", ".") != gasto_input_text and gasto_input_text != "":
+                actualizar_monto_db(item, gasto_procesado)
+                st.rerun()
+            elif gasto_input_text == "" and valor != 0.0:
+                actualizar_monto_db(item, 0.0)
+                st.rerun()
+                
+            total_gastos += gasto_procesado
+            if gasto_procesado > 0:
+                gastos_filtrados[item] = gasto_procesado
 
-saldo_disponible = total_ingresos - total_gastos
-# --- NUEVA SECCIÓN: METAS DE AHORRO CON TOPE DE DÍA ---
-st.markdown("---")
-st.markdown("### 🎯 Planificador de Metas de Ahorro")
+    saldo_disponible = total_ingresos - total_gastos
+with tab_ahorro:
+    st.subheader("🎯 Planificador de Metas de Ahorro")
 
-# Funciones internas para la gestión de metas
-def ejecutar_alta_meta(concepto, meta, actual, fecha):
+    def ejecutar_alta_meta(concepto, meta, actual, fecha):
+        conn = sqlite3.connect(RUTA_DB)
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO metas_ahorro VALUES (?, ?, ?, ?)", (concepto, meta, actual, fecha))
+        conn.commit()
+        conn.close()
+
+    with st.expander("➕ Configurar nueva meta o actualizar ahorro", expanded=False):
+        concepto_meta = st.text_input("¿Para qué estás ahorrando?:", placeholder="Ej: Vacaciones o Pie de Auto")
+        monto_meta_text = st.text_input("Monto Total Objetivo (CLP $):", placeholder="Ej: 2.000.000")
+        monto_actual_text = st.text_input("¿Cuánto dinero tienes ahorrado ya? (CLP $):", value="0", placeholder="Ej: 400.000")
+        fecha_tope_date = st.date_input("Tope de día para cumplir la meta:", value=datetime.now())
+        
+        if st.button("🎯 Establecer Meta de Ahorro", use_container_width=True):
+            val_meta = limpiar_y_convertir_monto(monto_meta_text)
+            val_actual = limpiar_y_convertir_monto(monto_actual_text)
+            if concepto_meta.strip() and val_meta > 0:
+                ejecutar_alta_meta(concepto_meta.strip(), val_meta, val_actual, fecha_tope_date.strftime("%Y-%m-%d"))
+                st.success("¡Meta guardada exitosamente!")
+                st.rerun()
+
     conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR REPLACE INTO metas_ahorro VALUES (?, ?, ?, ?)", (concepto, meta, actual, fecha))
-    conn.commit()
+    df_metas = pd.read_sql_query("SELECT * FROM metas_ahorro", conn)
     conn.close()
 
-with st.expander("➕ Configurar nueva meta o actualizar de ahorro", expanded=False):
-    concepto_meta = st.text_input("¿Para qué estás ahorrando?:", placeholder="Ej: Vacaciones o Pie de Auto")
-    monto_meta_text = st.text_input("Monto Total Objetivo (CLP $):", placeholder="Ej: 2.000.000")
-    monto_actual_text = st.text_input("¿Cuánto dinero tienes ahorrado ya? (CLP $):", value="0", placeholder="Ej: 400.000")
-    
-    # Campo de fecha táctil solicitado (Tope de día)
-    fecha_tope_date = st.date_input("Tope de día para cumplir la meta:", value=datetime.now())
-    
-    if st.button("🎯 Establecer Meta de Ahorro", use_container_width=True):
-        val_meta = limpiar_y_convertir_monto(monto_meta_text)
-        val_actual = limpiar_y_convertir_monto(monto_actual_text)
-        if concepto_meta.strip() and val_meta > 0:
-            ejecutar_alta_meta(concepto_meta.strip(), val_meta, val_actual, fecha_tope_date.strftime("%Y-%m-%d"))
-            st.success("¡Meta guardada exitosamente!")
-            st.rerun()
-        else:
-            st.error("Ingresa un concepto válido y un monto objetivo mayor a cero.")
+    if not df_metas.empty:
+        st.markdown("#### Tus Objetivos Activos")
+        for _, fila in df_metas.iterrows():
+            concepto = fila["concepto"]
+            m_meta = fila["monto_meta"]
+            m_actual = fila["monto_actual"]
+            f_tope = datetime.strptime(fila["fecha_tope"], "%Y-%m-%d").date()
+            dias_restantes = (f_tope - datetime.now().date()).days
+            faltante = m_meta - m_actual
+            progreso_pct = min(1.0, m_actual / m_meta) if m_meta > 0 else 0.0
+            
+            st.markdown(f"**🎯 {concepto}**")
+            st.progress(progreso_pct)
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write(f"Llevas: **{formatear_clp(m_actual)}** de {formatear_clp(m_meta)}")
+                st.write(f"Fecha Límite: **{f_tope.strftime('%d-%m-%Y')}**")
+            with col2:
+                if dias_restantes > 0:
+                    st.write(f"Días restantes: **{dias_restantes} días**")
+                    st.write(f"Debes ahorrar: **{formatear_clp(faltante / dias_restantes)} / día**")
+                elif dias_restantes == 0:
+                    st.warning("⚠️ ¡Hoy es el día tope!")
+                else:
+                    st.error(f"❌ Expiró hace {abs(dias_restantes)} días.")
+            if st.button(f"🗑️ Eliminar Meta: {concepto}", key=f"del_meta_{concepto}"):
+                conn = sqlite3.connect(RUTA_DB)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM metas_ahorro WHERE concepto = ?", (concepto,))
+                conn.commit()
+                conn.close()
+                st.rerun()
 
-# Renderizar metas activas guardadas en base de datos
-conn = sqlite3.connect(RUTA_DB)
-df_metas = pd.read_sql_query("SELECT * FROM metas_ahorro", conn)
-conn.close()
-
-if not df_metas.empty:
-    st.markdown("#### Tus Objetivos Activos")
-    for _, fila in df_metas.iterrows():
-        concepto = fila["concepto"]
-        m_meta = fila["monto_meta"]
-        m_actual = fila["monto_actual"]
-        f_tope_str = fila["fecha_tope"]
-        
-        # Cálculos de tiempo restante y ratios financieros
-        f_tope = datetime.strptime(f_tope_str, "%Y-%m-%d").date()
-        dias_restantes = (f_tope - datetime.now().date()).days
-        
-        faltante = m_meta - m_actual
-        progreso_pct = min(1.0, m_actual / m_meta) if m_meta > 0 else 0.0
-        
-        st.markdown(f"**🎯 {concepto}**")
-        st.progress(progreso_pct)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write(f"Llevas: **{formatear_clp(m_actual)}** de {formatear_clp(m_meta)}")
-            st.write(f"Fecha Límite: **{f_tope.strftime('%d-%m-%Y')}**")
-        with col2:
-            if dias_restantes > 0:
-                st.write(f"Días restantes: **{dias_restantes} días**")
-                cuota_diaria = faltante / dias_restantes if faltante > 0 else 0.0
-                st.write(f"Debes ahorrar: **{formatear_clp(cuota_diaria)} / día**")
-            elif dias_restantes == 0:
-                st.warning("⚠️ ¡Hoy es el día tope para cumplir este objetivo!")
-            else:
-                st.error(f"❌ El plazo expiró hace {abs(dias_restantes)} días.")
-                
-        if st.button(f"🗑️ Eliminar Meta: {concepto}", key=f"del_meta_{concepto}"):
-            conn = sqlite3.connect(RUTA_DB)
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM metas_ahorro WHERE concepto = ?", (concepto,))
-            conn.commit()
-            conn.close()
-            st.rerun()
-
-# --- ANALÍTICAS Y HISTORIAL ---
+# --- BLOQUE GENERAL DE ANALÍTICAS E HISTORIAL (SIEMPRE VISIBLE ABAJO) ---
 st.markdown("---")
 st.markdown("### 📊 Cuadro de Mando de Analíticas")
 st.metric("Total Ingresos", formatear_clp(total_ingresos))
@@ -413,7 +381,7 @@ if st.button("🗄️ Archivar Periodo y Actualizar Excel", use_container_width=
 
 st.subheader("📁 Periodos Consolidados")
 meses_hist = obtener_meses_historicos()
-mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m for m in meses_hist])
+mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m[0] for m in meses_hist])
 
 if mes_hist_sel != "Seleccione...":
     conn = sqlite3.connect(RUTA_DB)
@@ -421,4 +389,3 @@ if mes_hist_sel != "Seleccione...":
     conn.close()
     df_resumen['Monto'] = df_resumen['Monto'].apply(formatear_clp)
     st.dataframe(df_resumen, use_container_width=True)
-
