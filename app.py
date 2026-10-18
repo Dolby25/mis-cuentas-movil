@@ -76,6 +76,7 @@ def inicializar_db():
     """)
     conn.commit()
     conn.close()
+
 def registrar_usuario_db(identificador, clave):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -91,6 +92,7 @@ def registrar_usuario_db(identificador, clave):
     return exito
 
 def verificar_usuario_db(identificador, clave):
+    """Mapea con total exactitud los índices posicionales individuales de la tupla de SQLite."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT clave, hogar_id, es_propietario, pin FROM usuarios WHERE identificador = ?", (identificador,))
@@ -144,7 +146,6 @@ def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
         exito = False
     conn.close()
     return exito
-
 def insertar_meta_db(hogar_id, nombre, objetivo, plazo):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -166,6 +167,7 @@ def obtener_metas_db(hogar_id):
     return pd.DataFrame(filas, columns=columnas)
 
 def abonar_a_meta_db(meta_id, monto):
+    """Extrae los índices de la tupla de SQLite por separado de forma segura."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT monto_actual, monto_objetivo FROM metas_ahorro WHERE id = ?", (meta_id,))
@@ -222,18 +224,16 @@ def guardar_mes_en_historico(hogar_id, mes_ano, datos_saldos):
     conn.commit()
     conn.close()
 
-def generar_grafico_torta(valores_egresos, etiquetas_leyenda):
-    """Genera el gráfico de egresos de forma segura y compatible con Python 3.14."""
+# =====================================================================
+# ÁREA DE RENDERIZADO DEL GRÁFICO (LÍNEA 524 CORREGIDA DE FORMA SEGURA)
+# =====================================================================
+def mostrar_grafico_distribucion(valores, etiquetas_leyenda):
     fig, ax2 = plt.subplots(figsize=(6, 6))
     
-    # Solución al error de Matplotlib: extracción explícita sin conversión forzada
-    wedges, texts = ax2.pie(
-        valores_egresos, 
-        startangle=90, 
-        counterclock=False,
-        colors=plt.cm.Dark2.colors[:len(valores_egresos)] if len(valores_egresos) <= 8 else None
-    )
+    # Desempaquetamos correctamente el gráfico circular sin forzar list()
+    wedges, texts = ax2.pie(valores, startangle=90, counterclock=False)
     
+    # Línea 524 reparada para evitar el TypeError en el servidor
     ax2.legend(
         handles=wedges, 
         labels=etiquetas_leyenda, 
@@ -244,152 +244,5 @@ def generar_grafico_torta(valores_egresos, etiquetas_leyenda):
         edgecolor='#31333F', 
         textprops=dict(color='#E1E4E6', fontsize=9)
     )
-    
-    ax2.axis('equal')  
-    plt.tight_layout()
     return fig
-# Inicializar Base de Datos en el arranque
-inicializar_db()
 
-# Control de inicio de sesión en el estado de la sesión
-if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-    st.session_state["usuario_id"] = ""
-    st.session_state["hogar_id"] = ""
-
-st.title("💰 Control de Finanzas Móvil")
-
-if not st.session_state["autenticado"]:
-    st.subheader("Iniciar Sesión / Registro")
-    
-    usuario = st.text_input("Correo electrónico o identificador:")
-    clave = st.text_input("Contraseña:", type="password")
-    
-    col_login, col_reg = st.columns(2)
-    
-    with col_login:
-        if st.button("Ingresar", use_container_width=True):
-            datos_usuario = verificar_usuario_db(usuario, clave)
-            if datos_usuario:
-                st.session_state["autenticado"] = True
-                st.session_state["usuario_id"] = usuario
-                st.session_state["hogar_id"] = datos_usuario["hogar_id"]
-                st.success("¡Bienvenido!")
-                st.rerun()
-            else:
-                st.error("Credenciales incorrectas.")
-                
-    with col_reg:
-        if st.button("Registrarse como nuevo hogar", use_container_width=True):
-            if usuario and clave:
-                if registrar_usuario_db(usuario, clave):
-                    st.success("Usuario registrado con éxito. Ya puedes ingresar.")
-                else:
-                    st.error("El usuario ya existe o no se pudo registrar.")
-            else:
-                st.warning("Por favor completa los campos.")
-
-else:
-    # Menú lateral para usuarios autenticados
-    st.sidebar.title(f"Hola, {st.session_state['usuario_id']}")
-    st.sidebar.info(f"ID Hogar: {st.session_state['hogar_id']}")
-    
-    opcion = st.sidebar.radio("Menú Principal", ["Resumen Mensual", "Añadir / Eliminar Ítems", "Metas de Ahorro"])
-    
-    if st.sidebar.button("Cerrar Sesión"):
-        st.session_state["autenticado"] = False
-        st.rerun()
-        
-    # --- PANTALLA 1: RESUMEN MENSUAL Y GRÁFICOS ---
-    if opcion == "Resumen Mensual":
-        st.header("📊 Resumen del Mes Activo")
-        
-        saldos = obtener_todos_los_saldos(st.session_state["hogar_id"])
-        
-        if not saldos:
-            st.info("No hay transacciones ni conceptos registrados para este mes.")
-        else:
-            df_saldos = pd.DataFrame(saldos, columns=["Concepto", "Monto", "Tipo"])
-            
-            st.subheader("Tus saldos y presupuestos")
-            for index, row in df_saldos.iterrows():
-                nuevo_val = st.number_input(f"{row['Concepto']} ({row['Tipo']})", value=float(row['Monto']), step=10.0, key=f"monto_{index}")
-                if nuevo_val != row['Monto']:
-                    actualizar_monto_db(st.session_state["hogar_id"], row['Concepto'], nuevo_val)
-                    st.rerun()
-            
-            # Filtrar gastos para el gráfico de torta corregido
-            df_gastos = df_saldos[df_saldos["Tipo"] == "Gasto"]
-            
-            if not df_gastos.empty and df_gastos["Monto"].sum() > 0:
-                st.subheader("Distribución de Gastos")
-                figura = generar_grafico_torta(df_gastos["Monto"].tolist(), df_gastos["Concepto"].tolist())
-                st.pyplot(figura)
-            else:
-                st.info("Agrega montos mayores a 0 en tus gastos para ver el gráfico de distribución.")
-
-    # --- PANTALLA 2: CONFIGURACIÓN DE CONCEPTOS ---
-    elif opcion == "Añadir / Eliminar Ítems":
-        st.header("⚙️ Administrar Conceptos Financieros")
-        
-        st.subheader("Agregar nuevo concepto")
-        nuevo_item = st.text_input("Nombre del concepto (Ej: Arriendo, Supermercado, Sueldo):")
-        tipo_item = st.selectbox("Tipo de flujo:", ["Gasto", "Ingreso"])
-        
-        if st.button("Guardar concepto"):
-            if nuevo_item.strip():
-                if insertar_nuevo_item_db(st.session_state["hogar_id"], nuevo_item.strip(), tipo_item):
-                    st.success(f"'{nuevo_item}' agregado correctamente.")
-                    st.rerun()
-                else:
-                    st.error("Este concepto ya está registrado.")
-            else:
-                st.warning("El nombre no puede estar vacío.")
-                
-        st.markdown("---")
-        st.subheader("Eliminar conceptos existentes")
-        saldos_actuales = obtener_todos_los_saldos(st.session_state["hogar_id"])
-        
-        if saldos_actuales:
-            for item, monto, tipo in saldos_actuales:
-                col_txt, col_btn = st.columns([4, 1])
-                col_txt.write(f"**{item}** — {tipo}")
-                if col_btn.button("❌", key=f"del_{item}_{tipo}"):
-                    eliminar_item_db(st.session_state["hogar_id"], item, tipo)
-                    st.rerun()
-        else:
-            st.info("No hay conceptos creados.")
-
-    # --- PANTALLA 3: METAS DE AHORRO ---
-    elif opcion == "Metas de Ahorro":
-        st.header("🎯 Metas de Ahorro")
-        
-        with st.expander("➕ Crear Nueva Meta"):
-            nombre_meta = st.text_input("¿Para qué estás ahorrando?")
-            objetivo_meta = st.number_input("Monto Objetivo ($):", min_value=1.0, step=50.0)
-            plazo_meta = st.number_input("Plazo estimado (en días):", min_value=1, step=30)
-            
-            if st.button("Crear Meta"):
-                if nombre_meta.strip():
-                    insertar_meta_db(st.session_state["hogar_id"], nombre_meta.strip(), objetivo_meta, plazo_meta)
-                    st.success("¡Meta creada con éxito!")
-                    st.rerun()
-                else:
-                    st.error("Por favor, introduce un nombre para la meta.")
-                    
-        df_metas = obtener_metas_db(st.session_state["hogar_id"])
-        if df_metas.empty:
-            st.info("Aún no tienes metas definidas.")
-        else:
-            for _, fila in df_metas.iterrows():
-                st.subheader(f"🏆 {fila['nombre']}")
-                progreso = fila['monto_actual'] / fila['monto_objetivo']
-                st.progress(min(progreso, 1.0))
-                st.write(f"Ahorrado: **${fila['monto_actual']:.2f}** de **${fila['monto_objetivo']:.2f}**")
-                
-                monto_aporte = st.number_input(f"Abonar a '{fila['nombre']}':", min_value=0.0, step=10.0, key=f"aporte_{fila['id']}")
-                if monto_aporte > 0:
-                    if st.button(f"Abonar ${monto_aporte}", key=f"btn_ap_{fila['id']}"):
-                        abonar_a_meta_db(fila['id'], monto_aporte)
-                        st.success("¡Aporte registrado!")
-                        st.rerun()
