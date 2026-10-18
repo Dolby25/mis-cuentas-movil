@@ -15,14 +15,17 @@ def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     
+    # Comprobar la integridad de las tablas existentes
     tablas_a_validar = ["usuarios", "mes_activo", "historico", "metas_ahorro"]
     for tabla in tablas_a_validar:
         cursor.execute(f"PRAGMA table_info({tabla})")
-        columnas = [info for info in cursor.fetchall()]
+        columnas = [info[1] for info in cursor.fetchall()]
         if len(columnas) > 0:
+            # Si la tabla no cumple con el esquema multi-usuario avanzado, se purga de forma segura
             if (tabla == "usuarios" and "password" not in columnas) or (tabla != "usuarios" and "email" not in columnas):
                 cursor.execute(f"DROP TABLE {tabla}")
                 
+    # Creación de la arquitectura relacional segurizada
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             email TEXT PRIMARY KEY,
@@ -108,7 +111,7 @@ def obtener_todos_los_saldos(email):
     datos = cursor.fetchall()
     conn.close()
     
-    tiene_ingreso = any(row == "Ingreso" for row in datos)
+    tiene_ingreso = any(row[2] == "Ingreso" for row in datos)
     if not tiene_ingreso:
         conn = sqlite3.connect(RUTA_DB)
         cursor = conn.cursor()
@@ -151,7 +154,7 @@ def obtener_meses_historicos(email):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE email = ? ORDER BY id DESC", (email,))
-    meses = [fila for fila in cursor.fetchall()]
+    meses = [fila[0] for fila in cursor.fetchall()]
     conn.close()
     return meses
 
@@ -203,7 +206,8 @@ if not st.session_state["doble_factor_ok"]:
             if st.button("🚪 Entrar al Sistema", use_container_width=True):
                 if email_input and password_input:
                     cuenta = buscar_usuario(email_input)
-                    if cuenta and cuenta == password_input:
+                    # CORRECCIÓN INTEGRADA: Se valida cuenta[1] que corresponde a la columna password
+                    if cuenta and cuenta[1] == password_input:
                         st.session_state["usuario_conectado"] = email_input
                         st.session_state["primer_filtro_ok"] = True
                         st.rerun()
@@ -236,8 +240,9 @@ if not st.session_state["doble_factor_ok"]:
         st.write(f"Usuario activo: `{st.session_state['usuario_conectado']}`")
         pin_ingresado = st.text_input("Código PIN de 4 dígitos:", type="password", max_chars=4, placeholder="••••")
         
-        if st.button("🔓 Desbloquear Cuentas", use_container_width=True) or (len(pin_ingresado) == 4 and pin_ingresado == cuenta_maestra):
-            if pin_ingresado == cuenta_maestra:
+        if st.button("🔓 Desbloquear Cuentas", use_container_width=True) or (len(pin_ingresado) == 4 and pin_ingresado == cuenta_maestra[2]):
+            # CORRECCIÓN INTEGRADA: Se valida cuenta_maestra[2] que corresponde a la columna pin
+            if pin_ingresado == cuenta_maestra[2]:
                 st.session_state["doble_factor_ok"] = True
                 st.rerun()
             elif len(pin_ingresado) == 4:
@@ -267,71 +272,74 @@ with tab_periodo:
 
     st.markdown("### 📥 Ingresos Consolidados")
     saldos_db = obtener_todos_los_saldos(user_email)
-    nombre_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), "Ingresos Principales")
-    monto_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), 0.0)
+    nombre_ingreso_inicial = next((row[0] for row in saldos_db if row[2] == "Ingreso"), "Ingresos Principales")
+    monto_ingreso_inicial = next((row[1] for row in saldos_db if row[2] == "Ingreso"), 0.0)
 
     nuevo_nombre_ingreso = st.text_input("Concepto de Ingreso:", value=nombre_ingreso_inicial)
     if nuevo_nombre_ingreso != nombre_ingreso_inicial and nuevo_nombre_ingreso.strip():
         cambiar_nombre_ingreso_db(user_email, nombre_ingreso_inicial, nuevo_nombre_ingreso.strip())
         st.rerun()
 
-    # Callbacks dedicados para guardar montos antes del renderizado visual
-    def procesar_cambio_ingreso():
-        texto_ing = st.session_state["campo_ingreso_dinamico"]
-        valor_ing = limpiar_y_convertir_monto(texto_ing)
-        actualizar_monto_db(user_email, nuevo_nombre_ingreso, valor_ing)
-
-    monto_inicial_formateado = f"{int(monto_ingreso_inicial):,}".replace(",", ".") if monto_ingreso_inicial > 0 else ""
-    st.text_input(f"Monto {nuevo_nombre_ingreso} (CLP \$):", value=monto_inicial_formateado, key="campo_ingreso_dinamico", placeholder="Ej: 1.500.000", on_change=procesar_cambio_ingreso)
-    
-    # Recargar los saldos reales post-guardado
-    saldos_db = obtener_todos_los_saldos(user_email)
-    monto_ingreso = next((row for row in saldos_db if row == "Ingreso"), 0.0)
-
     st.markdown("---")
     st.markdown("### 💸 Controles Operativos de Gastos")
 
-    if "gasto_texto_tmp" not in st.session_state:
-        st.session_state["gasto_texto_tmp"] = ""
-
-    def ejecutar_alta_gasto():
-        texto_alta = st.session_state["campo_alta_gasto"].strip()
-        if texto_alta and texto_alta != nuevo_nombre_ingreso:
-            if insertar_nuevo_item_db(user_email, texto_alta, "Gasto"):
-                st.session_state["gasto_texto_tmp"] = ""
-                st.toast(f"'{texto_alta}' agregado.", icon="➕")
-
-    def ejecutar_baja_gasto():
-        target_baja = st.session_state["selector_baja_gasto"]
-        if target_baja != "Seleccione...":
-            eliminar_gasto_db(user_email, target_baja)
-            st.toast(f"'{target_baja}' eliminado.", icon="🗑️")
-
     col_add, col_del = st.columns(2)
     with col_add:
-        st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
-        st.button("➕ Añadir Gasto", use_container_width=True)
-    with col_del:
-        gastos_existentes = [row for row in saldos_db if row == "Gasto"]
-        st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
-        st.button("🗑️ Eliminar Gasto", use_container_width=True)
+        nuevo_gasto = st.text_input("Añadir nuevo concepto de gasto:", placeholder="Ej: Supermercado", key="campo_alta_gasto_manual")
+        if st.button("➕ Añadir Gasto", use_container_width=True):
+            texto_alta = nuevo_gasto.strip()
+            if texto_alta and texto_alta != nuevo_nombre_ingreso:
+                if insertar_nuevo_item_db(user_email, texto_alta, "Gasto"):
+                    st.toast(f"'{texto_alta}' agregado.", icon="➕")
+                    st.rerun()
+                else:
+                    st.error("Este ítem de gasto ya existe.")
 
+    with col_del:
+        gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
+        gasto_a_eliminar = st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto_manual")
+        if st.button("🗑️ Eliminar Gasto", use_container_width=True):
+            if gasto_a_eliminar != "Seleccione...":
+                eliminar_gasto_db(user_email, gasto_a_eliminar)
+                st.toast(f"'{gasto_a_eliminar}' eliminado.", icon="🗑️")
+                st.rerun()
+
+    # CORRECCIÓN MAESTRA: Todo el bloque de ingresos y gastos se procesa dentro de un Formulario Estable
+    # Esto evita las recargas automáticas destructivas que hacían desaparecer los montos al tipear
     st.markdown("#### Valores del Periodo")
-    total_ingresos = monto_ingreso
+    with st.form("formulario_valores_clp"):
+        monto_inicial_formateado = f"{int(monto_ingreso_inicial):,}".replace(",", ".") if monto_ingreso_inicial > 0 else ""
+        ingreso_input_text = st.text_input(f"Monto {nuevo_nombre_ingreso} (CLP \$):", value=monto_inicial_formateado, placeholder="Ej: 1.500.000")
+        
+        st.markdown("---")
+        inputs_gastos_dict = {}
+        for item, valor, tipo in saldos_db:
+            if tipo == "Gasto":
+                valor_inicial_formateado = f"{int(valor):,}".replace(",", ".") if valor > 0 else ""
+                inputs_gastos_dict[item] = st.text_input(f"Monto {item} (CLP \$):", value=valor_inicial_formateado, placeholder="Ej: 45.000")
+
+        # Único botón de guardado y cálculo masivo en la base de datos
+        if st.form_submit_button("💾 Guardar y Actualizar Saldos", use_container_width=True):
+            # 1. Guardar Ingreso
+            ingreso_val = limpiar_y_convertir_monto(ingreso_input_text)
+            actualizar_monto_db(user_email, nuevo_nombre_ingreso, ingreso_val)
+            
+            # 2. Guardar cada Gasto
+            for item, texto_gasto in inputs_gastos_dict.items():
+                gasto_val = limpiar_y_convertir_monto(texto_gasto)
+                actualizar_monto_db(user_email, item, gasto_val)
+                
+            st.success("¡Saldos del periodo reflejados y actualizados con éxito!")
+            st.rerun()
+
+    # Carga de datos procesados definitivos para inyectar en las métricas y gráficos de abajo
+    saldos_db_actualizados = obtener_todos_los_saldos(user_email)
+    total_ingresos = next((row[1] for row in saldos_db_actualizados if row[2] == "Ingreso"), 0.0)
     total_gastos = 0.0
     gastos_filtrados = {}
 
-    # Función Callback maestra para registrar los gastos de forma instantánea y estable
-    def procesar_cambio_gasto(item_gasto):
-        texto_g = st.session_state[f"gasto_input_{item_gasto}"]
-        valor_g = limpiar_y_convertir_monto(texto_g)
-        actualizar_monto_db(user_email, item_gasto, valor_g)
-
-    for item, valor, tipo in saldos_db:
+    for item, valor, tipo in saldos_db_actualizados:
         if tipo == "Gasto":
-            valor_inicial_formateado = f"{int(valor):,}".replace(",", ".") if valor > 0 else ""
-            st.text_input(f"Monto {item} (CLP \$):", value=valor_inicial_formateado, key=f"gasto_input_{item}", placeholder="Ej: 45.000", on_change=procesar_cambio_gasto, args=(item,))
-            
             total_gastos += valor
             if valor > 0:
                 gastos_filtrados[item] = valor
