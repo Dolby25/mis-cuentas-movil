@@ -90,16 +90,17 @@ def registrar_usuario_db(identificador, clave):
     return exito
 
 def verificar_usuario_db(identificador, clave):
-    """Mapea con total exactitud los índices posicionales individuales de la tupla de SQLite para evitar bloqueos."""
+    """Mapea con total exactitud los índices posicionales individuales de la tupla de SQLite."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT clave, hogar_id, es_propietario, pin FROM usuarios WHERE identificador = ?", (identificador,))
     resultado = cursor.fetchone()
     conn.close()
+    
     if resultado and resultado[0] == clave:
         return {
             "hogar_id": resultado[1],
-            "es_propietario": resultado[2],
+            "es_propietario": True if resultado[2] == 1 else False,
             "pin": resultado[3]
         }
     return None
@@ -164,13 +165,14 @@ def obtener_metas_db(hogar_id):
     return pd.DataFrame(filas, columns=columnas)
 
 def abonar_a_meta_db(meta_id, monto):
-    """Desempaqueta de forma individual y segura los dos montos mapeados en SQLite."""
+    """Extrae los índices de la tupla de SQLite por separado de forma segura."""
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT monto_actual, monto_objetivo FROM metas_ahorro WHERE id = ?", (meta_id,))
     res = cursor.fetchone()
     if res:
-        monto_actual, monto_objetivo = res[0], res[1]
+        monto_actual = res[0]
+        monto_objetivo = res[1]
         nuevo_monto = monto_actual + monto
         completado = 1 if nuevo_monto >= monto_objetivo else 0
         cursor.execute("UPDATE metas_ahorro SET monto_actual = ?, completado = ? WHERE id = ?", (nuevo_monto, completado, meta_id))
@@ -518,7 +520,7 @@ with tab_cuentas:
                 texto_item = f"{k} ({porcentaje_calc:.1f}% - {monto_formateado})"
                 etiquetas_leyenda.append(texto_item)
             
-            # Forzamos a convertir las cuñas en una lista nativa pura para evitar colapsos con 1 solo gasto
+            # Forzamos a convertir el objeto gráfico en una lista nativa pura de Python
             ax2.legend(handles=list(wedges), labels=etiquetas_leyenda, title="Conceptos de Egreso", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1),
                        facecolor='#1E222A', edgecolor='#31333F', textprops=dict(color='#E1E4E6', fontsize=9))
             ax2.set_title("Distribución de Egresos", color="#E1E4E6", fontsize=12, fontweight="bold", pad=15)
@@ -573,3 +575,4 @@ st.markdown("---")
 if st.button("🔒 Bloquear Pantalla (Fijar PIN)", use_container_width=True):
     st.session_state["pin_desbloqueado"] = False
     st.rerun()
+
