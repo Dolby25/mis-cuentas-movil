@@ -15,6 +15,7 @@ st.set_page_config(page_title="Administrador de finanzas", page_icon="💰", lay
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
 RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v5.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
+
 def es_correo_valido(correo):
     """Verifica si la estructura corresponde a un correo real."""
     patron = r'^[\w\.-]+@[\w\.-]+\.\w+$'
@@ -75,6 +76,7 @@ def inicializar_db():
     """)
     conn.commit()
     conn.close()
+
 def registrar_usuario_db(identificador, clave):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
@@ -143,8 +145,7 @@ def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
     else:
         exito = False
     conn.close()
-    return exito
-def insertar_meta_db(hogar_id, nombre, objetivo, plazo):
+    return def insertar_meta_db(hogar_id, nombre, objetivo, plazo):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
@@ -221,358 +222,37 @@ def guardar_mes_en_historico(hogar_id, mes_ano, datos_saldos):
         cursor.execute("INSERT INTO historico (hogar_id, mes_ano, item, monto, tipo) VALUES (?, ?, ?, ?, ?)", (hogar_id, mes_ano, item, monto, tipo))
     conn.commit()
     conn.close()
-    exportar_datos_a_excel(hogar_id)
 
-def exportar_datos_a_excel(hogar_id):
-    conn = sqlite3.connect(RUTA_DB)
-    df_historico = pd.read_sql_query("SELECT mes_ano, item, monto, tipo FROM historico WHERE hogar_id = ?", conn, params=(hogar_id,))
-    conn.close()
-    if df_historico.empty:
-        return
-    df_desglose = df_historico.copy()
-    df_desglose.columns = ["Mes-Año", "Concepto", "Monto (CLP)", "Tipo Flujo"]
-    df_gastos = df_historico[df_historico['tipo'] == 'Gasto']
-    if not df_gastos.empty:
-        df_comparativa = df_gastos.groupby('mes_ano')['monto'].sum().reset_index()
-        df_comparativa.columns = ["Periodo Contable", "Total Gastos Mensuales (CLP)"]
-        df_comparativa = df_comparativa.sort_values(by="Total Gastos Mensuales (CLP)", ascending=False)
-    else:
-        df_comparativa = pd.DataFrame(columns=["Periodo Contable", "Total Gastos Mensuales (CLP)"])
-    with pd.ExcelWriter(RUTA_EXCEL, engine='openpyxl') as writer:
-        df_desglose.to_excel(writer, sheet_name="Historial Desglosado", index=False)
-        df_comparativa.to_excel(writer, sheet_name="Comparativa de Gastos", index=False)
 
-def obtener_meses_historicos(hogar_id):
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE hogar_id = ? ORDER BY id DESC", (hogar_id,))
-    meses = [fila[0] for fila in cursor.fetchall()]
-    conn.close()
-    return meses
+# =====================================================================
+# SECCIÓN GENERACIÓN DE GRÁFICOS (CORREGIDA PARA EVITAR EL TYPEERROR)
+# =====================================================================
 
-def matrimonial_formatear_clp(monto):
-    valor_absoluto = int(round(abs(monto)))
-    formato_numero = f"${valor_absoluto:,}".replace(",", ".")
-    return formato_numero if monto >= 0 else f"-{formato_numero}"
-
-def ocultar_monto_clp(monto, modo_oculto_activo):
-    if modo_oculto_activo:
-        return "$ •••.•••"
-    return matrimonial_formatear_clp(monto)
-
-inicializar_db()
-# --- INICIALIZACIÓN DE VARIABLES EN MEMORIA (SESSION STATE) ---
-if "cuenta_usuario" not in st.session_state:
-    st.session_state["cuenta_usuario"] = ""
-if "hogar_id" not in st.session_state:
-    st.session_state["hogar_id"] = ""
-if "es_propietario" not in st.session_state:
-    st.session_state["es_propietario"] = True
-if "pin_usuario" not in st.session_state:
-    st.session_state["pin_usuario"] = None
-if "pin_desbloqueado" not in st.session_state:
-    st.session_state["pin_desbloqueado"] = False
-
-if not st.session_state["cuenta_usuario"]:
-    st.title("📱 Administrador de finanzas")
-    tab_log, tab_reg = st.tabs(["Iniciar Sesión", "Crear Cuenta"])
-    with tab_log:
-        u_input = st.text_input("Correo Electrónico:", key="main_u").strip().lower()
-        p_input = st.text_input("Contraseña:", type="password", key="main_p")
-        if st.button("🔓 Conectar Dispositivo", use_container_width=True):
-            res = verificar_usuario_db(u_input, p_input)
-            if res:
-                st.session_state["cuenta_usuario"] = u_input
-                st.session_state["hogar_id"] = res["hogar_id"]
-                st.session_state["es_propietario"] = res["es_propietario"]
-                st.session_state["pin_usuario"] = res["pin"]
-                st.rerun()
-            else:
-                st.error("Credenciales incorrectas o usuario no registrado.")
-    with tab_reg:
-        u_reg = st.text_input("Registrar Nuevo Correo:", key="reg_u").strip().lower()
-        p_reg = st.text_input("Definir Contraseña:", type="password", key="reg_pass")
-        if st.button("🚀 Crear Cuenta Familiar", use_container_width=True):
-            if es_correo_valido(u_reg) and p_reg.strip():
-                if registrar_usuario_db(u_reg, p_reg.strip()):
-                    st.success("¡Cuenta vinculada con éxito! Ya puedes iniciar sesión.")
-                else:
-                    st.error("Ese correo ya existe en el sistema.")
-            else:
-                st.error("Ingresa un correo verdadero válido.")
-    st.stop()
-
-if st.session_state["pin_usuario"] and not st.session_state["pin_desbloqueado"]:
-    st.title("📱 Administrador de finanzas")
-    st.info(f"Sesión activa: **{st.session_state['cuenta_usuario']}**")
-    pin_ingresado = st.text_input("Introduce tu PIN numérico de 4 dígitos:", type="password", max_chars=4, placeholder="••••")
-    if st.button("🔓 Desbloquear App", use_container_width=True):
-        if pin_ingresado == st.session_state["pin_usuario"]:
-            st.session_state["pin_desbloqueado"] = True
-            st.rerun()
-        else:
-            st.error("PIN incorrecto. Inténtalo de nuevo.")
-    st.stop()
-
-if not st.session_state["pin_usuario"]:
-    st.title("⚙️ Configuración Obligatoria del PIN")
-    st.warning("Define un código PIN corto de 4 números para abrir tu aplicación en el día a día.")
-    nuevo_pin_1 = st.text_input("Crea tu PIN rápido de 4 dígitos:", type="password", max_chars=4, placeholder="Ej: 1234")
-    nuevo_pin_2 = st.text_input("Confirma tu PIN:", type="password", max_chars=4)
-    if st.button("💾 Guardar PIN de Seguridad", use_container_width=True):
-        if nuevo_pin_1.isdigit() and len(nuevo_pin_1) == 4 and nuevo_pin_1 == nuevo_pin_2:
-            actualizar_pin_db(st.session_state["cuenta_usuario"], nuevo_pin_1)
-            st.session_state["pin_usuario"] = nuevo_pin_1
-            st.session_state["pin_desbloqueado"] = True
-            st.success("¡PIN configurado correctamente!")
-            st.rerun()
-        else:
-            st.error("Los códigos deben ser de 4 dígitos, numéricos y coincidir exactamente.")
-    st.stop()
-# --- PANEL OPERATIVO AUTORIZADO (SISTEMA DESBLOQUEADO) ---
-usuario_logueado = st.session_state["cuenta_usuario"]
-hogar_actual = st.session_state["hogar_id"]
-es_propietario = st.session_state["es_propietario"]
-
-st.title("📱 Administrador de finanzas")
-st.info(f"🟢 Conectado como: **{usuario_logueado}**")
-
-st.markdown("---")
-modo_oculto = st.toggle("👁️ Activar Modo Oculto (Censurar saldos y gráficos)", value=False)
-
-tab_cuentas, tab_metas, tab_miembros = st.tabs(["📊 Control Mensual", "🎯 Metas de Ahorro", "👥 Invitar / Compartir"])
-
-with tab_metas:
-    st.markdown("### 🎯 Tus Objetivos de Ahorro")
-    with st.expander("➕ Añadir Nueva Meta de Ahorro"):
-        nom_meta = st.text_input("¿Qué quieres lograr? (Ej: Vacaciones o Auto):", placeholder="Escribe el nombre aquí...")
-        obj_meta = st.number_input("Monto total que necesitan ahorrar (CLP $):", min_value=0, step=10000)
-        plazo_meta = st.number_input("¿En cuántos días deben cumplirlo?:", min_value=1, step=1)
-        if st.button("🎯 Crear Meta del Hogar", use_container_width=True):
-            if nom_meta.strip() and obj_meta > 0:
-                insertar_meta_db(hogar_actual, nom_meta.strip(), float(obj_meta), int(plazo_meta))
-                st.success(f"¡Meta '{nom_meta}' guardada con un plazo de {plazo_meta} días!")
-                st.rerun()
-
-    df_metas = obtener_metas_db(hogar_actual)
-    if not df_metas.empty:
-        st.markdown("#### Progreso de Objetivos Activos")
-        for idx, row in df_metas.iterrows():
-            f_inicio = datetime.strptime(row['fecha_inicio'], "%Y-%m-%d")
-            f_limite = f_inicio + timedelta(days=int(row['plazo_dias']))
-            dias_restantes = (f_limite - datetime.now()).days
-            st.markdown(f"**Objetivo: {row['nombre']}**")
-            porcentaje = min(float(row['monto_actual'] / row['monto_objetivo']), 1.0)
-            st.progress(porcentaje)
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                ahorrado_txt = ocultar_monto_clp(row['monto_actual'], modo_oculto)
-                objetivo_txt = ocultar_monto_clp(row['monto_objetivo'], modo_oculto)
-                st.write(f"Ahorrado: {ahorrado_txt} de {objetivo_txt}")
-            with col_m2:
-                if dias_restantes >= 0 and row['completado'] == 0:
-                    st.write(f"⏳ Quedan **{dias_restantes} días** de plazo.")
-                elif row['completado'] == 1:
-                    st.write("🏆 ¡Objetivo cumplido!")
-                else:
-                    st.write("❌ Plazo vencido.")
-            if row['completado'] == 0:
-                monto_abono = st.number_input(f"Monto a depositar en {row['nombre']} (CLP $):", min_value=0, step=5000, key=f"abono_{row['id']}")
-                if st.button(f"💰 Guardar Ahorro para {row['nombre']}", key=f"btn_abono_{row['id']}"):
-                    if monto_abono > 0:
-                        abonar_a_meta_db(row['id'], float(monto_abono))
-                        st.rerun()
-            st.markdown("---")
-            
-        st.markdown("### 🏆 Logros y Trofeos del Hogar")
-        metas_ganadas = df_metas[df_metas['completado'] == 1]
-        if not metas_ganadas.empty:
-            for idx, m in metas_ganadas.iterrows():
-                obj_ganado_txt = ocultar_monto_clp(m['monto_objetivo'], modo_oculto)
-                st.success(f"🏅 **LOGRO DESBLOQUEADO:** ¡Cumplieron la meta **'{m['nombre']}'** ahorrando un total de {obj_ganado_txt} con éxito! Guardado permanentemente.")
-        else:
-            st.caption("Aún no tienen logros guardados. ¡Completen su primera meta de ahorro para ganar una medalla!")
-    else:
-        st.caption("No hay metas configuradas en este hogar.")
-with tab_cuentas:
-    col_mes, col_ano = st.columns(2)
-    with col_mes:
-        mes_sel = st.selectbox("Mes:", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=9)
-    with col_ano:
-        ano_sel = st.selectbox("Año:", ["2025", "2026", "2027", "2028"], index=1)
-    periodo_completo = f"{mes_sel} {ano_sel}"
-
-    st.markdown("### 📥 Ingresos Consolidados")
-    if "nuevo_ingreso_tmp" not in st.session_state:
-        st.session_state["nuevo_ingreso_tmp"] = ""
-
-    def ejecutar_alta_ingreso():
-        texto_alta = st.session_state["campo_alta_ingreso"].strip()
-        if texto_alta:
-            if insertar_nuevo_item_db(hogar_actual, texto_alta, "Ingreso"):
-                st.session_state["nuevo_ingreso_tmp"] = ""
-                st.toast(f"Ingreso '{texto_alta}' añadido.", icon="➕")
-
-    with st.expander("👥 Añadir casilla para sueldos compartidos"):
-        st.text_input("Nombre de la fuente de ingreso (Ej: Sueldo Milena):", value=st.session_state["nuevo_ingreso_tmp"], key="campo_alta_ingreso", on_change=ejecutar_alta_ingreso)
-        st.button("Confirmar Nuevo Ingreso", use_container_width=True)
-
-    saldos_db = obtener_todos_los_saldos(hogar_actual)
-    total_ingresos = 0.0
-    ingresos_existentes = [row for row in saldos_db if row[2] == "Ingreso"]
-
-    for item_nom, valor_monto, tipo_flujo in ingresos_existentes:
-        col_ing_txt, col_ing_del = st.columns([0.85, 0.15])
-        with col_ing_txt:
-            ingreso_num = st.number_input(f"Monto {item_nom} (CLP $):", value=int(valor_monto), min_value=0, step=1000, key=f"ingreso_input_{item_nom}")
-        with col_ing_del:
-            st.markdown("<div style='padding-top: 28px;'></div>", unsafe_allow_html=True)
-            if st.button("🗑️", key=f"del_ing_{item_nom}"):
-                eliminar_item_db(hogar_actual, item_nom, "Ingreso")
-                st.rerun()
-        if ingreso_num != valor_monto:
-            actualizar_monto_db(hogar_actual, item_nom, float(ingreso_num))
-            st.rerun()
-        total_ingresos += ingreso_num
-
-    st.markdown("### 💸 Controles Operativos de Gastos")
-    if "campo_alta_gasto" not in st.session_state:
-        st.session_state["campo_alta_gasto"] = ""
-
-    def ejecutar_alta_gasto():
-        texto_alta = st.session_state["campo_alta_gasto"].strip()
-        if texto_alta:
-            if insertar_nuevo_item_db(hogar_actual, texto_alta, "Gasto"):
-                st.session_state["campo_alta_gasto"] = ""
-                st.toast(f"'{texto_alta}' agregado.", icon="➕")
-
-    def ejecutar_baja_gasto():
-        target_baja = st.session_state["selector_baja_gasto"]
-        if target_baja != "Seleccione...":
-            eliminar_item_db(hogar_actual, target_baja, "Gasto")
-
-    col_add, col_del = st.columns(2)
-    with col_add:
-        st.text_input("Añadir nuevo concepto de gasto:", key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
-    with col_del:
-        gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
-        st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
-
-    st.markdown("#### Valores del Periodo")
-    total_gastos = 0.0
-    gastos_filtrados = {}
-
-    for item, valor, tipo in saldos_db:
-        if tipo == "Gasto":
-            gasto_num = st.number_input(f"Monto {item} (CLP $):", value=int(valor), min_value=0, step=1000, key=f"gasto_input_{item}")
-            if gasto_num != valor:
-                actualizar_monto_db(hogar_actual, item, float(gasto_num))
-                st.rerun()
-            total_gastos += gasto_num
-            if gasto_num > 0:
-                gastos_filtrados[item] = gasto_num
-
-    saldo_disponible = total_ingresos - total_gastos
-    st.markdown("---")
-    st.markdown("### 📊 Cuadro de Mando de Analíticas")
-    st.metric("Total Ingresos", ocultar_monto_clp(total_ingresos, modo_oculto))
-    st.metric("Total Gastos", ocultar_monto_clp(total_gastos, modo_oculto))
-    st.metric("Balance Neto", ocultar_monto_clp(saldo_disponible, modo_oculto))
-
-    if modo_oculto:
-        st.warning("🔒 Los gráficos analíticos están ocultos de forma temporal debido al Modo Oculto activo.")
-    else:
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
-        fig.patch.set_facecolor('#0E1117')
-        ax1.set_facecolor("#0E1117")
-        ax2.set_facecolor("#0E1117")
-        
-        # Barras delgadas estilizadas premium (width=0.2)
-        barras = ax1.bar(["Ingresos", "Gastos"], [total_ingresos, total_gastos], color=["#00C49F", "#FF8042"], width=0.2, edgecolor='none')
-        ax1.set_title("Balance Financiero", color="#E1E4E6", fontsize=12, fontweight="bold", pad=15)
-        ax1.tick_params(colors="#A0A5AD", labelsize=10)
-        
-        # Eje izquierdo fijado desde 0$ en CLP
-        ax1.set_ylim(bottom=0)
-        ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, pos: matrimonial_formatear_clp(x)))
-        
-        ax1.spines['top'].set_visible(False)
-        ax1.spines['right'].set_visible(False)
-        ax1.spines['left'].set_color('#31333F')
-        ax1.spines['bottom'].set_color('#31333F')
-        ax1.grid(axis='y', color='#262730', linestyle='--', linewidth=0.5)
-        ax1.set_axisbelow(True)
-        
-        for bar in barras:
-            yval = bar.get_height()
-            ax1.text(bar.get_x() + bar.get_width()/2, yval + (total_ingresos * 0.02 if total_ingresos > 0 else 1), 
-                     matrimonial_formatear_clp(yval), ha='center', va='bottom', color='#E1E4E6', fontsize=10, fontweight="bold")
-        
-        if gastos_filtrados:
-            wedges, texts = ax2.pie(gastos_filtrados.values(), wedgeprops=dict(width=0.4, edgecolor='#0E1117', linewidth=2), startangle=90, colors=['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'])
-            total_g = sum(gastos_filtrados.values())
-            
-            # Formateador robusto para la leyenda lateral compatible con Python 3.14
-            etiquetas_leyenda = []
-            for k, v in gastos_filtrados.items():
-                porcentaje_calc = (v / total_g) * 100
-                monto_formateado = matrimonial_formatear_clp(v)
-                texto_item = f"{k} ({porcentaje_calc:.1f}% - {monto_formateado})"
-                etiquetas_leyenda.append(texto_item)
-            
-            # Forzamos a convertir el objeto gráfico en una lista nativa pura de Python
-            ax2.legend(handles=list(wedges), labels=etiquetas_leyenda, title="Conceptos de Egreso", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1),
-                       facecolor='#1E222A', edgecolor='#31333F', textprops=dict(color='#E1E4E6', fontsize=9))
-            ax2.set_title("Distribución de Egresos", color="#E1E4E6", fontsize=12, fontweight="bold", pad=15)
-        else:
-            ax2.text(0.5, 0.5, 'Sin transacciones de egreso', ha='center', va='center', color='#8A9099', fontsize=10)
-        st.pyplot(fig)
-
-    if st.button("🗄️ Archivar Periodo y Actualizar Excel", use_container_width=True):
-        if total_ingresos + total_gastos > 0:
-            guardar_mes_en_historico(hogar_actual, periodo_completo, obtener_todos_los_saldos(hogar_actual))
-            st.success(f"¡Periodo contable {periodo_completo} indexado con éxito!")
-
-    st.subheader("📁 Periodos Consolidados")
-    meses_hist = obtener_meses_historicos(hogar_actual)
-    mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + meses_hist)
-    if mes_hist_sel != "Seleccione...":
-        conn = sqlite3.connect(RUTA_DB)
-        df_resumen = pd.read_sql_query("SELECT item as 'Concepto', monto as 'Monto' FROM historico WHERE hogar_id = ? AND mes_ano = ?", conn, params=(hogar_actual, mes_hist_sel))
-        conn.close()
-        df_resumen['Monto'] = df_resumen['Monto'].apply(lambda x: ocultar_monto_clp(x, modo_oculto))
-        st.dataframe(df_resumen, use_container_width=True)
-
-with tab_miembros:
-    tab_env, tab_rec = st.tabs(["✉️ Emitir Invitación", "🔗 Enlazar Código"])
-    with tab_env:
-        if es_propietario:
-            st.write("Genera un token numérico único para invitar a alguien a tu panel.")
-            codigo_actual_db = obtener_codigo_activo_db(hogar_actual)
-            if codigo_actual_db:
-                st.markdown("Código activo para enviar:")
-                st.code(codigo_actual_db, language="text")
-            else:
-                st.warning("No tienes ningún código activo.")
-            if st.button("🔄 Generar / Renovar Código Único", key="gen_token"):
-                solicitar_nuevo_codigo_db(hogar_actual)
-                st.rerun()
-        else:
-            st.warning("Solo el propietario del hogar puede emitir códigos de invitación.")
-    with tab_rec:
-        st.write("Ingresa el código que recibiste para unirte a las cuentas de otro hogar.")
-        cod_ing = st.text_input("Introduce el código de invitación (Ej: INV-A1B2):", placeholder="INV-XXXX", key="p3_token").strip().upper()
-        if st.button("Confirmar Vinculación", use_container_width=True, key="p3_btn_token"):
-            if cod_ing:
-                if enlazar_y_quemar_codigo_db(usuario_logueado, cod_ing):
-                    st.success("¡Cuentas enlazadas de forma correcta!")
-                    st.session_state["pin_desbloqueado"] = False
-                    st.rerun()
-                else:
-                    st.error("El código es inválido o ya caducó.")
-
-st.markdown("---")
-if st.button("🔒 Bloquear Pantalla (Fijar PIN)", use_container_width=True):
-    st.session_state["pin_desbloqueado"] = False
-    st.rerun()
-
+def generar_grafico_torta(valores_egresos, etiquetas_leyenda):
+    """Genera el gráfico de egresos de forma segura y compatible con Python 3.14."""
+    fig, ax2 = plt.subplots(figsize=(6, 6))
+    
+    # SE CORRIGE: Desempaquetamos de forma explícita los objetos devueltos por .pie()
+    wedges, texts = ax2.pie(
+        valores_egresos, 
+        startangle=90, 
+        counterclock=False,
+        colors=plt.cm.Dark2.colors[:len(valores_egresos)] if len(valores_egresos) <= 8 else None
+    )
+    
+    # SE CORRIGE: Se elimina 'list(wedges)' y se pasa directamente el iterador nativo de artistas
+    ax2.legend(
+        handles=wedges, 
+        labels=etiquetas_leyenda, 
+        title="Conceptos de Egreso", 
+        loc="center left", 
+        bbox_to_anchor=(1, 0, 0.5, 1),
+        facecolor='#1E222A', 
+        edgecolor='#31333F', 
+        textprops=dict(color='#E1E4E6', fontsize=9)
+    )
+    
+    ax2.axis('equal')  
+    plt.tight_layout()
+    return fig
+exito
