@@ -145,7 +145,9 @@ def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
     else:
         exito = False
     conn.close()
-    return def insertar_meta_db(hogar_id, nombre, objetivo, plazo):
+    return exito
+
+def insertar_meta_db(hogar_id, nombre, objetivo, plazo):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     fecha_hoy = datetime.now().strftime("%Y-%m-%d")
@@ -223,16 +225,11 @@ def guardar_mes_en_historico(hogar_id, mes_ano, datos_saldos):
     conn.commit()
     conn.close()
 
-
-# =====================================================================
-# SECCIÓN GENERACIÓN DE GRÁFICOS (CORREGIDA PARA EVITAR EL TYPEERROR)
-# =====================================================================
-
 def generar_grafico_torta(valores_egresos, etiquetas_leyenda):
     """Genera el gráfico de egresos de forma segura y compatible con Python 3.14."""
     fig, ax2 = plt.subplots(figsize=(6, 6))
     
-    # SE CORRIGE: Desempaquetamos de forma explícita los objetos devueltos por .pie()
+    # Desempaquetamos de forma explícita los objetos devueltos por .pie()
     wedges, texts = ax2.pie(
         valores_egresos, 
         startangle=90, 
@@ -240,7 +237,7 @@ def generar_grafico_torta(valores_egresos, etiquetas_leyenda):
         colors=plt.cm.Dark2.colors[:len(valores_egresos)] if len(valores_egresos) <= 8 else None
     )
     
-    # SE CORRIGE: Se elimina 'list(wedges)' y se pasa directamente el iterador nativo de artistas
+    # Se pasa directamente el iterador nativo de artistas (wedges) sin list()
     ax2.legend(
         handles=wedges, 
         labels=etiquetas_leyenda, 
@@ -255,4 +252,3 @@ def generar_grafico_torta(valores_egresos, etiquetas_leyenda):
     ax2.axis('equal')  
     plt.tight_layout()
     return fig
-exito
