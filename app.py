@@ -15,7 +15,7 @@ def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     
-    # 1. Tabla Maestra de Cuentas de Usuarios
+    # 1. Tabla Maestra de Usuarios
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             email TEXT PRIMARY KEY,
@@ -24,7 +24,14 @@ def inicializar_db():
         )
     """)
     
-    # 2. Tabla de Mes Activo indexada por correo del usuario
+    # 2. Verificar si la tabla mes_activo es antigua y necesita migración estructural
+    cursor.execute("PRAGMA table_info(mes_activo)")
+    columnas = [info[1] for info in cursor.fetchall()]
+    
+    if len(columnas) > 0 and "email" not in columnas:
+        # Si la tabla existe pero no tiene la columna email, la reiniciamos de forma segura
+        cursor.execute("DROP TABLE mes_activo")
+        
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             email TEXT,
@@ -35,7 +42,12 @@ def inicializar_db():
         )
     """)
     
-    # 3. Histórico Contable indexado por correo del usuario
+    # 3. Verificar si la tabla historico es antigua y necesita migración
+    cursor.execute("PRAGMA table_info(historico)")
+    columnas_hist = [info[1] for info in cursor.fetchall()]
+    if len(columnas_hist) > 0 and "email" not in columnas_hist:
+        cursor.execute("DROP TABLE historico")
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +59,7 @@ def inicializar_db():
         )
     """)
     
-    # 4. Metas de Ahorro indexadas por correo del usuario
+    # 4. Tabla de Metas de Ahorro
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS metas_ahorro (
             email TEXT,
@@ -107,7 +119,6 @@ def obtener_todos_los_saldos(email):
     datos = cursor.fetchall()
     conn.close()
     
-    # Si es un usuario nuevo, insertamos su fila base inicial de ingresos
     tiene_ingreso = any(row[2] == "Ingreso" for row in datos)
     if not tiene_ingreso:
         conn = sqlite3.connect(RUTA_DB)
@@ -183,7 +194,6 @@ def registrar_usuario(email, password, pin):
     return exito
 inicializar_db()
 
-# Inicialización de estados de sesión del ecosistema de login
 if "usuario_conectado" not in st.session_state:
     st.session_state["usuario_conectado"] = None
 if "primer_filtro_ok" not in st.session_state:
@@ -191,48 +201,53 @@ if "primer_filtro_ok" not in st.session_state:
 if "doble_factor_ok" not in st.session_state:
     st.session_state["doble_factor_ok"] = False
 
-# --- PANTALLA DE AUTENTICACIÓN MULTI-USUARIO ---
+# Requerimiento: Pantalla unificada que solicita Correo y Contraseña juntos al iniciar
 if not st.session_state["doble_factor_ok"]:
     st.title("🔐 Acceso al Sistema de Finanzas")
     
     if not st.session_state["primer_filtro_ok"]:
-        email_input = st.text_input("Correo Electrónico:", placeholder="usuario@correo.com").strip().lower()
+        # Menú táctil para elegir entre entrar o registrar una cuenta nueva
+        modo_acceso = st.radio("Seleccione una opción:", ["Iniciar Sesión", "Crear Cuenta Nueva"], horizontal=True)
         
-        if email_input:
-            cuenta_existente = buscar_usuario(email_input)
-            
-            if cuenta_existente is None:
-                st.info("ℹ️ Este correo no está registrado. Completa las casillas de abajo para crear tu cuenta privada.")
-                reg_password = st.text_input("Crea tu Contraseña:", type="password", key="reg_pass")
-                reg_pin = st.text_input("Crea tu PIN de Doble Seguridad (4 números):", type="password", max_chars=4, key="reg_pin")
-                
-                if st.button("🆕 Crear Cuenta y Continuar", use_container_width=True):
-                    if reg_password.strip() and len(reg_pin) == 4 and reg_pin.isdigit():
-                        if registrar_usuario(email_input, reg_password, reg_pin):
-                            st.session_state["usuario_conectado"] = email_input
-                            st.session_state["primer_filtro_ok"] = True
-                            st.rerun()
-                        else:
-                            st.error("Error al registrar el usuario.")
-                    else:
-                        st.error("La contraseña no puede estar vacía y el PIN debe ser de 4 números.")
-            else:
-                st.subheader("🔑 Iniciar Sesión")
-                pass_input = st.text_input("Contraseña:", type="password", key="login_pass")
-                if st.button("🚪 Validar Credenciales", use_container_width=True) or (pass_input and pass_input == cuenta_existente[1]):
-                    if pass_input == cuenta_existente[1]:
+        email_input = st.text_input("Correo Electrónico:", placeholder="ejemplo@correo.com").strip().lower()
+        password_input = st.text_input("Contraseña:", type="password", placeholder="••••••••")
+        
+        if modo_acceso == "Iniciar Sesión":
+            if st.button("🚪 Entrar al Sistema", use_container_width=True):
+                if email_input and password_input:
+                    cuenta = buscar_usuario(email_input)
+                    if cuenta and cuenta[1] == password_input:
                         st.session_state["usuario_conectado"] = email_input
                         st.session_state["primer_filtro_ok"] = True
                         st.rerun()
                     else:
-                        st.error("Contraseña incorrecta.")
+                        st.error("El correo electrónico o la contraseña son incorrectos.")
+                else:
+                    st.warning("Por favor, rellene todos los campos.")
+        
+        else:
+            reg_pin = st.text_input("Crea tu PIN de doble seguridad (4 números):", type="password", max_chars=4, placeholder="1234")
+            if st.button("🆕 Registrarse e Ingresar", use_container_width=True):
+                if email_input and password_input and len(reg_pin) == 4 and reg_pin.isdigit():
+                    if buscar_usuario(email_input) is None:
+                        if registrar_usuario(email_input, password_input, reg_pin):
+                            st.session_state["usuario_conectado"] = email_input
+                            st.session_state["primer_filtro_ok"] = True
+                            st.success("¡Cuenta creada exitosamente!")
+                            st.rerun()
+                        else:
+                            st.error("Ocurrió un problema durante el registro.")
+                    else:
+                        st.error("Este correo electrónico ya se encuentra registrado.")
+                else:
+                    st.error("Rellene los campos. El PIN debe ser estrictamente de 4 números.")
         st.stop()
         
     else:
-        # FASE 2: Verificación de Doble Seguridad por PIN
+        # FASE 2: Pantalla de Doble Factor por PIN Táctil solicitado
         cuenta_maestra = buscar_usuario(st.session_state["usuario_conectado"])
         st.subheader("🔢 Doble Factor: Ingrese su PIN")
-        st.write(f"Conectado como: `{st.session_state['usuario_conectado']}`")
+        st.write(f"Usuario activo: `{st.session_state['usuario_conectado']}`")
         pin_ingresado = st.text_input("Código PIN de 4 dígitos:", type="password", max_chars=4, placeholder="••••")
         
         if st.button("🔓 Desbloquear Cuentas", use_container_width=True) or (len(pin_ingresado) == 4 and pin_ingresado == cuenta_maestra[2]):
@@ -240,13 +255,12 @@ if not st.session_state["doble_factor_ok"]:
                 st.session_state["doble_factor_ok"] = True
                 st.rerun()
             elif len(pin_ingresado) == 4:
-                st.error("PIN de seguridad incorrecto.")
+                st.error("El código PIN de seguridad es incorrecto.")
         st.stop()
-# --- INTERFAZ DE TRABAJO INDEPENDIENTE PROTEGIDA ---
 user_email = st.session_state["usuario_conectado"]
 
 st.title("📱 Control Financiero Móvil")
-st.write(f"Sesión activa: `{user_email}`")
+st.write(f"Usuario conectado: `{user_email}`")
 if st.button("🔒 Cerrar Sesión", key="btn_logout"):
     st.session_state["usuario_conectado"] = None
     st.session_state["primer_filtro_ok"] = False
@@ -267,8 +281,8 @@ with tab_periodo:
 
     st.markdown("### 📥 Ingresos Consolidados")
     saldos_db = obtener_todos_los_saldos(user_email)
-    nombre_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), "Ingresos Principales")
-    monto_ingreso_inicial = next((row for row in saldos_db if row == "Ingreso"), 0.0)
+    nombre_ingreso_inicial = next((row[0] for row in saldos_db if row[2] == "Ingreso"), "Ingresos Principales")
+    monto_ingreso_inicial = next((row[1] for row in saldos_db if row[2] == "Ingreso"), 0.0)
 
     nuevo_nombre_ingreso = st.text_input("Concepto de Ingreso:", value=nombre_ingreso_inicial)
     if nuevo_nombre_ingreso != nombre_ingreso_inicial and nuevo_nombre_ingreso.strip():
@@ -312,7 +326,7 @@ with tab_periodo:
         st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
         st.button("➕ Añadir Gasto", use_container_width=True)
     with col_del:
-        gastos_existentes = [row for row in saldos_db if row == "Gasto"]
+        gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
         st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
         st.button("🗑️ Eliminar Gasto", use_container_width=True)
 
@@ -400,7 +414,7 @@ with tab_ahorro:
                 conn.close()
                 st.rerun()
 
-# --- BLOQUE GENERAL DE ANALÍTICAS INDEPENDIENTES ---
+# --- BLOQUE GENERAL DE ANALÍTICAS E HISTORIAL DEL USUARIO ---
 st.markdown("---")
 st.markdown("### 📊 Cuadro de Mando de Analíticas")
 st.metric("Total Ingresos", formatear_clp(total_ingresos))
@@ -450,3 +464,4 @@ if mes_hist_sel != "Seleccione...":
     conn.close()
     df_resumen['Monto'] = df_resumen['Monto'].apply(formatear_clp)
     st.dataframe(df_resumen, use_container_width=True)
+
