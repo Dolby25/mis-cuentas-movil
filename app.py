@@ -15,7 +15,17 @@ def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     
-    # 1. Tabla Maestra de Usuarios
+    # Validar y purgar tablas antiguas si tienen columnas incompatibles
+    tablas_a_validar = ["usuarios", "mes_activo", "historico"]
+    for tabla in tablas_a_validar:
+        cursor.execute(f"PRAGMA table_info({tabla})")
+        columnas = [info[1] for info in cursor.fetchall()]
+        if len(columnas) > 0:
+            # Si es la tabla usuarios vieja sin contraseña, o tablas viejas sin la columna email, las borramos
+            if (tabla == "usuarios" and "password" not in columnas) or (tabla != "usuarios" and "email" not in columnas):
+                cursor.execute(f"DROP TABLE {tabla}")
+                
+    # 1. Tabla Maestra de Usuarios Limpia
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             email TEXT PRIMARY KEY,
@@ -24,14 +34,7 @@ def inicializar_db():
         )
     """)
     
-    # 2. Verificar si la tabla mes_activo es antigua y necesita migración estructural
-    cursor.execute("PRAGMA table_info(mes_activo)")
-    columnas = [info[1] for info in cursor.fetchall()]
-    
-    if len(columnas) > 0 and "email" not in columnas:
-        # Si la tabla existe pero no tiene la columna email, la reiniciamos de forma segura
-        cursor.execute("DROP TABLE mes_activo")
-        
+    # 2. Tabla de Mes Activo Multi-Usuario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
             email TEXT,
@@ -42,12 +45,7 @@ def inicializar_db():
         )
     """)
     
-    # 3. Verificar si la tabla historico es antigua y necesita migración
-    cursor.execute("PRAGMA table_info(historico)")
-    columnas_hist = [info[1] for info in cursor.fetchall()]
-    if len(columnas_hist) > 0 and "email" not in columnas_hist:
-        cursor.execute("DROP TABLE historico")
-
+    # 3. Histórico Contable Multi-Usuario
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,7 +160,7 @@ def obtener_meses_historicos(email):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT mes_ano FROM historico WHERE email = ? ORDER BY id DESC", (email,))
-    meses = [fila for fila in cursor.fetchall()]
+    meses = [fila[0] for fila in cursor.fetchall()]
     conn.close()
     return meses
 
@@ -201,12 +199,10 @@ if "primer_filtro_ok" not in st.session_state:
 if "doble_factor_ok" not in st.session_state:
     st.session_state["doble_factor_ok"] = False
 
-# Requerimiento: Pantalla unificada que solicita Correo y Contraseña juntos al iniciar
 if not st.session_state["doble_factor_ok"]:
     st.title("🔐 Acceso al Sistema de Finanzas")
     
     if not st.session_state["primer_filtro_ok"]:
-        # Menú táctil para elegir entre entrar o registrar una cuenta nueva
         modo_acceso = st.radio("Seleccione una opción:", ["Iniciar Sesión", "Crear Cuenta Nueva"], horizontal=True)
         
         email_input = st.text_input("Correo Electrónico:", placeholder="ejemplo@correo.com").strip().lower()
@@ -244,7 +240,6 @@ if not st.session_state["doble_factor_ok"]:
         st.stop()
         
     else:
-        # FASE 2: Pantalla de Doble Factor por PIN Táctil solicitado
         cuenta_maestra = buscar_usuario(st.session_state["usuario_conectado"])
         st.subheader("🔢 Doble Factor: Ingrese su PIN")
         st.write(f"Usuario activo: `{st.session_state['usuario_conectado']}`")
@@ -414,7 +409,7 @@ with tab_ahorro:
                 conn.close()
                 st.rerun()
 
-# --- BLOQUE GENERAL DE ANALÍTICAS E HISTORIAL DEL USUARIO ---
+# --- BLOQUE GENERAL DE ANALÍTICAS E HISTORIAL ---
 st.markdown("---")
 st.markdown("### 📊 Cuadro de Mando de Analíticas")
 st.metric("Total Ingresos", formatear_clp(total_ingresos))
@@ -464,4 +459,3 @@ if mes_hist_sel != "Seleccione...":
     conn.close()
     df_resumen['Monto'] = df_resumen['Monto'].apply(formatear_clp)
     st.dataframe(df_resumen, use_container_width=True)
-
