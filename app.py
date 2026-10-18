@@ -3,85 +3,62 @@ import sqlite3
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
-import re
-import random
-import string
-from datetime import datetime, timedelta
 
-st.set_page_config(page_title="Administrador de finanzas", page_icon="💰", layout="centered")
+st.set_page_config(page_title="Control Financiero", page_icon="💰", layout="centered")
 
-# CONFIGURACIÓN DE LAS RUTAS DE LA BASE DE DATOS Y REPORTE EXCEL
 RUTA_CARPETA = os.path.dirname(os.path.abspath(__file__))
-RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_v5.db")
+RUTA_DB = os.path.join(RUTA_CARPETA, "control_cuentas_dinamico.db")
 RUTA_EXCEL = os.path.join(RUTA_CARPETA, "reporte_finanzas.xlsx")
-
-def es_correo_valido(correo):
-    """Verifica si la estructura corresponde a un correo real."""
-    patron = r'^[\w\.-]+@[\w\.-]+\.\w+$'
-    return re.match(patron, correo) is not None
-
-def generar_string_aleatorio():
-    """Genera un código dinámico único de 6 caracteres."""
-    return "INV-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
 def inicializar_db():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            identificador TEXT PRIMARY KEY,
-            clave TEXT NOT NULL,
-            hogar_id TEXT NOT NULL,
-            es_propietario INTEGER NOT NULL DEFAULT 1,
-            pin TEXT DEFAULT NULL
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS codigos_invitacion (
-            hogar_id TEXT PRIMARY KEY,
-            codigo TEXT NOT NULL UNIQUE
-        )
-    """)
-    cursor.execute("""
         CREATE TABLE IF NOT EXISTS mes_activo (
-            hogar_id TEXT,
-            item TEXT,
+            item TEXT PRIMARY KEY,
             monto REAL NOT NULL,
-            tipo TEXT NOT NULL,
-            PRIMARY KEY (hogar_id, item)
+            tipo TEXT NOT NULL
         )
     """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS historico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            hogar_id TEXT NOT NULL,
             mes_ano TEXT NOT NULL,
             item TEXT NOT NULL,
             monto REAL NOT NULL,
             tipo TEXT NOT NULL DEFAULT 'Gasto'
         )
     """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS metas_ahorro (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            hogar_id TEXT NOT NULL,
-            nombre TEXT NOT NULL,
-            monto_objetivo REAL NOT NULL,
-            monto_actual REAL NOT NULL DEFAULT 0.0,
-            fecha_inicio TEXT NOT NULL,
-            plazo_dias INTEGER NOT NULL,
-            completado INTEGER NOT NULL DEFAULT 0
-        )
-    """)
+    cursor.execute("SELECT COUNT(*) FROM mes_activo WHERE tipo = 'Ingreso'")
+    if cursor.fetchone() == 0:
+        cursor.execute("INSERT OR IGNORE INTO mes_activo (item, monto, tipo) VALUES ('Ingresos Principales', 0.0, 'Ingreso')")
     conn.commit()
     conn.close()
-def registrar_usuario_db(identificador, clave):
+
+def actualizar_monto_db(item, nuevo_monto):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    nuevo_hogar = "HOGAR-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    cursor.execute("UPDATE mes_activo SET monto = ? WHERE item = ?", (nuevo_monto, item))
+    conn.commit()
+    conn.close()
+
+def insertar_nuevo_item_db(item, tipo="Gasto"):
+    conn = sqlite3.connect(RUTA_DB)
+    cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO usuarios (identificador, clave, hogar_id, es_propietario) VALUES (?, ?, ?, 1)", (identificador, clave, nuevo_hogar))
-        cursor.execute("INSERT INTO mes_activo (hogar_id, item, monto, tipo) VALUES (?, 'Ingresos Principales', 0.0, 'Ingreso')", (nuevo_hogar,))
+        cursor.execute("INSERT INTO mes_activo (item, monto, tipo) VALUES (?, 0.0, ?)", (item, tipo))
+        conn.commit()
+        exito = True
+    except sqlite3.IntegrityError:
+        exito = False
+    conn.close()
+    return exito
+def cambiar_nombre_ingreso_db(viejo_nombre, nuevo_nombre):
+    if viejo_nombre == nuevo_nombre:
+        return True
+    conn = sqlite3.connect(RUTA_DB)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE mes_activo SET item = ? WHERE item = ? AND tipo = 'Ingreso'", (nuevo_nombre, viejo_nombre))
         conn.commit()
         exito = True
     except sqlite3.IntegrityError:
@@ -89,303 +66,220 @@ def registrar_usuario_db(identificador, clave):
     conn.close()
     return exito
 
-def verificar_usuario_db(identificador, clave):
-    """Mapea con total exactitud los índices posicionales individuales de la tupla de SQLite."""
+def eliminar_gasto_db(item):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("SELECT clave, hogar_id, es_propietario, pin FROM usuarios WHERE identificador = ?", (identificador,))
-    resultado = cursor.fetchone()
-    conn.close()
-    
-    if resultado and resultado[0] == clave:
-        return {
-            "hogar_id": resultado[1],
-            "es_propietario": True if resultado[2] == 1 else False,
-            "pin": resultado[3]
-        }
-    return None
-
-def actualizar_pin_db(usuario_id, nuevo_pin):
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE usuarios SET pin = ? WHERE identificador = ?", (nuevo_pin, usuario_id))
-    conn.commit()
-    conn.close()
-def solicitar_nuevo_codigo_db(hogar_id):
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    nuevo_codigo = generar_string_aleatorio()
-    cursor.execute("INSERT OR REPLACE INTO codigos_invitacion (hogar_id, codigo) VALUES (?, ?)", (hogar_id, nuevo_codigo))
-    conn.commit()
-    conn.close()
-    return nuevo_codigo
-
-def obtener_codigo_activo_db(hogar_id):
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    cursor.execute("SELECT codigo FROM codigos_invitacion WHERE hogar_id = ?", (hogar_id,))
-    fila = cursor.fetchone()
-    conn.close()
-    return fila if fila else None
-
-def enlazar_y_quemar_codigo_db(usuario_id, codigo_ingresado):
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    cursor.execute("SELECT hogar_id FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
-    resultado = cursor.fetchone()
-    if resultado:
-        hogar_destino = resultado
-        cursor.execute("UPDATE usuarios SET hogar_id = ?, es_propietario = 0 WHERE identificador = ?", (hogar_destino, usuario_id))
-        cursor.execute("DELETE FROM codigos_invitacion WHERE codigo = ?", (codigo_ingresado,))
-        conn.commit()
-        exito = True
-    else:
-        exito = False
-    conn.close()
-    return exito
-def insertar_meta_db(hogar_id, nombre, objetivo, plazo):
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    fecha_hoy = datetime.now().strftime("%Y-%m-%d")
-    cursor.execute("""
-        INSERT INTO metas_ahorro (hogar_id, nombre, monto_objetivo, monto_actual, fecha_inicio, plazo_dias, completado)
-        VALUES (?, ?, ?, 0.0, ?, ?, 0)
-    """, (hogar_id, nombre, objetivo, fecha_hoy, plazo))
+    cursor.execute("DELETE FROM mes_activo WHERE item = ? AND tipo = 'Gasto'", (item,))
     conn.commit()
     conn.close()
 
-def obtener_metas_db(hogar_id):
+def obtener_todos_los_saldos():
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, nombre, monto_objetivo, monto_actual, fecha_inicio, plazo_dias, completado FROM metas_ahorro WHERE hogar_id = ?", (hogar_id,))
-    filas = cursor.fetchall()
-    conn.close()
-    columnas = ['id', 'nombre', 'monto_objetivo', 'monto_actual', 'fecha_inicio', 'plazo_dias', 'completado']
-    return pd.DataFrame(filas, columns=columnas)
-
-def abonar_a_meta_db(meta_id, monto):
-    """Extrae los índices de la tupla de SQLite por separado de forma segura."""
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    cursor.execute("SELECT monto_actual, monto_objetivo FROM metas_ahorro WHERE id = ?", (meta_id,))
-    res = cursor.fetchone()
-    if res:
-        monto_actual = res
-        monto_objetivo = res
-        nuevo_monto = monto_actual + monto
-        completado = 1 if nuevo_monto >= monto_objetivo else 0
-        cursor.execute("UPDATE metas_ahorro SET monto_actual = ?, completado = ? WHERE id = ?", (nuevo_monto, completado, meta_id))
-        conn.commit()
-    conn.close()
-def actualizar_monto_db(hogar_id, item, nuevo_monto):
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE mes_activo SET monto = ? WHERE hogar_id = ? AND item = ?", (nuevo_monto, hogar_id, item))
-    conn.commit()
-    conn.close()
-
-def insertar_nuevo_item_db(hogar_id, item, tipo="Gasto"):
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    try:
-        cursor.execute("INSERT INTO mes_activo (hogar_id, item, monto, tipo) VALUES (?, ?, 0.0, ?)", (hogar_id, item, tipo))
-        conn.commit()
-        exito = True
-    except sqlite3.IntegrityError:
-        exito = False
-    conn.close()
-    return exito
-
-def eliminar_item_db(hogar_id, item, tipo):
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM mes_activo WHERE hogar_id = ? AND item = ? AND tipo = ?", (hogar_id, item, tipo))
-    conn.commit()
-    conn.close()
-def obtener_todos_los_saldos(hogar_id):
-    conn = sqlite3.connect(RUTA_DB)
-    cursor = conn.cursor()
-    cursor.execute("SELECT item, monto, tipo FROM mes_activo WHERE hogar_id = ?", (hogar_id,))
+    cursor.execute("SELECT item, monto, tipo FROM mes_activo")
     datos = cursor.fetchall()
     conn.close()
     return datos
 
-def guardar_mes_en_historico(hogar_id, mes_ano, datos_saldos):
+def guardar_mes_en_historico(mes_ano, datos_saldos):
     conn = sqlite3.connect(RUTA_DB)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM historico WHERE hogar_id = ? AND mes_ano = ?", (hogar_id, mes_ano))
+    cursor.execute("DELETE FROM historico WHERE mes_ano = ?", (mes_ano,))
     for item, monto, tipo in datos_saldos:
-        cursor.execute("INSERT INTO historico (hogar_id, mes_ano, item, monto, tipo) VALUES (?, ?, ?, ?, ?)", (hogar_id, mes_ano, item, monto, tipo))
+        cursor.execute("INSERT INTO historico (mes_ano, item, monto, tipo) VALUES (?, ?, ?, ?)", (mes_ano, item, monto, tipo))
     conn.commit()
     conn.close()
-def generar_grafico_torta(valores_egresos, etiquetas_leyenda):
-    """Genera el gráfico de egresos de forma segura y compatible con Python 3.14."""
-    fig, ax2 = plt.subplots(figsize=(6, 6))
-    
-    # Se desempaquetan explícitamente los elementos devueltos por el gráfico circular
-    wedges, texts = ax2.pie(
-        valores_egresos, 
-        startangle=90, 
-        counterclock=False,
-        colors=plt.cm.Dark2.colors[:len(valores_egresos)] if len(valores_egresos) <= 8 else None
-    )
-    
-    # CORRECCIÓN LÍNEA 524: Pasamos 'wedges' directamente sin la conversión 'list()' que provocaba el TypeError
-    ax2.legend(
-        handles=wedges, 
-        labels=etiquetas_leyenda, 
-        title="Conceptos de Egreso", 
-        loc="center left", 
-        bbox_to_anchor=(1, 0, 0.5, 1),
-        facecolor='#1E222A', 
-        edgecolor='#31333F', 
-        textprops=dict(color='#E1E4E6', fontsize=9)
-    )
-    
-    ax2.axis('equal')  
-    plt.tight_layout()
-    return fig
-# Inicializar la base de datos automáticamente al cargar la aplicación
+    exportar_datos_a_excel()
+
+def exportar_datos_a_excel():
+    conn = sqlite3.connect(RUTA_DB)
+    df_historico = pd.read_sql_query("SELECT mes_ano, item, monto, tipo FROM historico", conn)
+    conn.close()
+    if df_historico.empty:
+        return
+    df_desglose = df_historico.copy()
+    df_desglose.columns = ["Mes-Año", "Concepto", "Monto (CLP)", "Tipo Flujo"]
+    df_gastos = df_historico[df_historico['tipo'] == 'Gasto']
+    if not df_gastos.empty:
+        df_comparativa = df_gastos.groupby('mes_ano')['monto'].sum().reset_index()
+        df_comparativa.columns = ["Periodo Contable", "Total Gastos Mensuales (CLP)"]
+        df_comparativa = df_comparativa.sort_values(by="Total Gastos Mensuales (CLP)", ascending=False)
+    else:
+        df_comparativa = pd.DataFrame(columns=["Periodo Contable", "Total Gastos Mensuales (CLP)"])
+    with pd.ExcelWriter(RUTA_EXCEL, engine='openpyxl') as writer:
+        df_desglose.to_excel(writer, sheet_name="Historial Desglosado", index=False)
+        df_comparativa.to_excel(writer, sheet_name="Comparativa de Gastos", index=False)
+
+def obtener_meses_historicos():
+    conn = sqlite3.connect(RUTA_DB)
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT mes_ano FROM historico ORDER BY id DESC")
+    meses = [fila for fila in cursor.fetchall()]
+    conn.close()
+    return meses
+
+def formatear_clp(monto):
+    valor_absoluto = int(round(abs(monto)))
+    formato_numero = f"${valor_absoluto:,}".replace(",", ".")
+    return formato_numero if monto >= 0 else f"-{formato_numero}"
+
+def limpiar_y_convertir_monto(texto_monto):
+    texto_limpio = texto_monto.replace("$", "").replace(".", "").strip()
+    if not texto_limpio:
+        return 0.0
+    try:
+        return float(texto_limpio)
+    except ValueError:
+        return 0.0
 inicializar_db()
 
-# Inicialización segura del estado de la sesión de Streamlit para el usuario
-if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-    st.session_state["usuario_id"] = ""
-    st.session_state["hogar_id"] = ""
-st.title("💰 Control de Finanzas Móvil")
+st.title("📱 Control Financiero Móvil")
 
-if not st.session_state["autenticado"]:
-    st.subheader("Iniciar Sesión / Registro")
-    
-    usuario = st.text_input("Correo electrónico o identificador:")
-    clave = st.text_input("Contraseña:", type="password")
-    
-    col_login, col_reg = st.columns(2)
-    
-    with col_login:
-        if st.button("Ingresar", use_container_width=True):
-            datos_usuario = verificar_usuario_db(usuario, clave)
-            if datos_usuario:
-                st.session_state["autenticado"] = True
-                st.session_state["usuario_id"] = usuario
-                st.session_state["hogar_id"] = datos_usuario["hogar_id"]
-                st.success("¡Bienvenido!")
-                st.rerun()
-            else:
-                st.error("Credenciales incorrectas.")
-                
-    with col_reg:
-        if st.button("Registrarse como nuevo hogar", use_container_width=True):
-            if usuario and clave:
-                if registrar_usuario_db(usuario, clave):
-                    st.success("Usuario registrado con éxito. Ya puedes ingresar.")
-                else:
-                    st.error("El usuario ya existe o no se pudo registrar.")
-            else:
-                st.warning("Por favor completa los campos.")
+st.subheader("👤 Bienvenido al sistema")
+usuario_app = st.text_input("Ingrese su nombre para comenzar:", value="", placeholder="Escriba su nombre aquí...")
 
+st.markdown("---")
+st.subheader("📅 Periodo Contable Activo")
+col_mes, col_ano = st.columns(2)
+with col_mes:
+    mes_sel = st.selectbox("Mes:", ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"], index=8)
+with col_ano:
+    ano_sel = st.selectbox("Año:", ["2025", "2026", "2027", "2028"], index=1)
+periodo_completo = f"{mes_sel} {ano_sel}"
+
+st.markdown("### 📥 Ingresos Consolidados")
+saldos_db = obtener_todos_los_saldos()
+nombre_ingreso_inicial = next((row for row in saldos_db if row[2] == "Ingreso"), "Ingresos Principales")
+monto_ingreso_inicial = next((row for row in saldos_db if row[2] == "Ingreso"), 0.0)
+
+nuevo_nombre_ingreso = st.text_input("Concepto de Ingreso:", value=nombre_ingreso_inicial)
+if nuevo_nombre_ingreso != nombre_ingreso_inicial and nuevo_nombre_ingreso.strip():
+    cambiar_nombre_ingreso_db(nombre_ingreso_inicial, nuevo_nombre_ingreso.strip())
+    st.rerun()
+
+monto_inicial_formateado = f"{int(monto_ingreso_inicial):,}".replace(",", ".") if monto_ingreso_inicial > 0 else ""
+ingreso_input_text = st.text_input(f"Monto {nuevo_nombre_ingreso} (CLP $):", value=monto_inicial_formateado, placeholder="Ej: 1.500.000")
+
+ingreso_procesado = limpiar_y_convertir_monto(ingreso_input_text)
+texto_formateado_ingreso = f"{int(ingreso_procesado):,}".replace(",", ".") if ingreso_procesado > 0 else ""
+
+if texto_formateado_ingreso != ingreso_input_text and ingreso_input_text != "":
+    actualizar_monto_db(nuevo_nombre_ingreso, ingreso_procesado)
+    st.rerun()
+elif ingreso_input_text == "" and monto_ingreso_inicial != 0.0:
+    actualizar_monto_db(nuevo_nombre_ingreso, 0.0)
+    st.rerun()
+
+monto_ingreso = ingreso_procesado
+st.markdown("---")
+st.markdown("### 💸 Controles Operativos de Gastos")
+
+if "gasto_texto_tmp" not in st.session_state:
+    st.session_state["gasto_texto_tmp"] = ""
+
+# Funciones de ejecución inmediata antes de re-renderizar la pantalla
+def ejecutar_alta_gasto():
+    texto_alta = st.session_state["campo_alta_gasto"].strip()
+    if texto_alta:
+        if texto_alta != nuevo_nombre_ingreso:
+            if insertar_nuevo_item_db(texto_alta, "Gasto"):
+                st.session_state["gasto_texto_tmp"] = ""
+                st.toast(f"'{texto_alta}' agregado.", icon="➕")
+            else:
+                st.error("Este ítem de gasto ya se encuentra registrado.")
+        else:
+            st.error("El nombre coincide con la casilla activa de ingresos.")
+
+def ejecutar_baja_gasto():
+    target_baja = st.session_state["selector_baja_gasto"]
+    if target_baja != "Seleccione...":
+        eliminar_gasto_db(target_baja)
+        st.toast(f"'{target_baja}' eliminado.", icon="🗑️")
+
+col_add, col_del = st.columns(2)
+
+with col_add:
+    st.text_input("Añadir nuevo concepto de gasto:", value=st.session_state["gasto_texto_tmp"], key="campo_alta_gasto", placeholder="Ej: Supermercado", on_change=ejecutar_alta_gasto)
+    st.button("➕ Añadir Gasto", use_container_width=True)
+
+with col_del:
+    gastos_existentes = [row[0] for row in saldos_db if row[2] == "Gasto"]
+    st.selectbox("Eliminar un gasto:", ["Seleccione..."] + gastos_existentes, key="selector_baja_gasto", on_change=ejecutar_baja_gasto)
+    st.button("🗑️ Eliminar Gasto", use_container_width=True)
+
+st.markdown("#### Valores del Periodo")
+total_ingresos = monto_ingreso
+total_gastos = 0.0
+gastos_filtrados = {}
+
+for item, valor, tipo in saldos_db:
+    if tipo == "Gasto":
+        valor_inicial_formateado = f"{int(valor):,}".replace(",", ".") if valor > 0 else ""
+        gasto_input_text = st.text_input(f"Monto {item} (CLP $):", value=valor_inicial_formateado, key=f"gasto_input_{item}", placeholder="Ej: 45.000")
+        
+        gasto_procesado = limpiar_y_convertir_monto(gasto_input_text)
+        texto_formateado_gasto = f"{int(gasto_procesado):,}".replace(",", ".") if gasto_procesado > 0 else ""
+        
+        if texto_formateado_gasto != gasto_input_text and gasto_input_text != "":
+            actualizar_monto_db(item, gasto_procesado)
+            st.rerun()
+        elif gasto_input_text == "" and valor != 0.0:
+            actualizar_monto_db(item, 0.0)
+            st.rerun()
+            
+        total_gastos += gasto_procesado
+        if gasto_procesado > 0:
+            gastos_filtrados[item] = gasto_procesado
+
+saldo_disponible = total_ingresos - total_gastos
+st.markdown("---")
+st.markdown("### 📊 Cuadro de Mando de Analíticas")
+st.metric("Total Ingresos", formatear_clp(total_ingresos))
+st.metric("Total Gastos", formatear_clp(total_gastos))
+st.metric("Balance Neto", formatear_clp(saldo_disponible))
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 8))
+fig.patch.set_facecolor('#282C34')
+
+ax1.set_facecolor("#282C34")
+ax2.set_facecolor("#282C34")
+
+barras = ax1.bar(["Ingresos", "Gastos"], [total_ingresos, total_gastos], color=["#4A90E2", "#E74C3C"], width=0.4)
+ax1.set_title("Balance Financiero", color="#E1E4E6", fontsize=12, fontweight="bold")
+ax1.tick_params(colors="#A0A5AD", labelsize=10)
+for bar in barras:
+    yval = bar.get_height()
+    ax1.text(bar.get_x() + bar.get_width()/2, yval + 1, formatear_clp(yval), ha='center', va='bottom', color='#E1E4E6', fontsize=10, fontweight="bold")
+
+if gastos_filtrados:
+    ax2.pie(gastos_filtrados.values(), labels=gastos_filtrados.keys(), autopct='%1.1f%%', startangle=90, textprops=dict(color="#E1E4E6", fontsize=10), colors=['#4A90E2', '#357ABD', '#225E9B', '#1B4780', '#5C9CE6'])
+    ax2.set_title("Distribución de Egresos", color="#E1E4E6", fontsize=12, fontweight="bold")
 else:
-    # Menú lateral para usuarios autenticados
-    st.sidebar.title(f"Hola, {st.session_state['usuario_id']}")
-    st.sidebar.info(f"ID Hogar: {st.session_state['hogar_id']}")
-    
-    opcion = st.sidebar.radio("Menú Principal", ["Resumen Mensual", "Añadir / Eliminar Ítems", "Metas de Ahorro"])
-    
-    if st.sidebar.button("Cerrar Sesión"):
-        st.session_state["autenticado"] = False
+    ax2.text(0.5, 0.5, 'Sin transacciones de egreso', ha='center', va='center', color='#8A9099', fontsize=10)
+
+st.pyplot(fig)
+
+st.markdown("---")
+if st.button("🗄️ Archivar Periodo y Actualizar Excel", use_container_width=True):
+    if total_ingresos + total_gastos > 0:
+        guardar_mes_en_historico(periodo_completo, obtener_todos_los_saldos())
+        conn = sqlite3.connect(RUTA_DB)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE mes_activo SET monto = 0.0")
+        conn.commit()
+        conn.close()
+        st.success(f"¡Periodo contable {periodo_completo} indexado con éxito!")
         st.rerun()
-        
-    # --- PANTALLA 1: RESUMEN MENSUAL Y GRÁFICOS ---
-    if opcion == "Resumen Mensual":
-        st.header("📊 Resumen del Mes Activo")
-        
-        saldos = obtener_todos_los_saldos(st.session_state["hogar_id"])
-        
-        if not saldos:
-            st.info("No hay transacciones ni conceptos registrados para este mes.")
-        else:
-            df_saldos = pd.DataFrame(saldos, columns=["Concepto", "Monto", "Tipo"])
-            
-            st.subheader("Tus saldos y presupuestos")
-            for index, row in df_saldos.iterrows():
-                nuevo_val = st.number_input(f"{row['Concepto']} ({row['Tipo']})", value=float(row['Monto']), step=10.0, key=f"monto_{index}")
-                if nuevo_val != row['Monto']:
-                    actualizar_monto_db(st.session_state["hogar_id"], row['Concepto'], nuevo_val)
-                    st.rerun()
-            
-            # Filtrar gastos para el gráfico de torta corregido
-            df_gastos = df_saldos[df_saldos["Tipo"] == "Gasto"]
-            
-            if not df_gastos.empty and df_gastos["Monto"].sum() > 0:
-                st.subheader("Distribución de Gastos")
-                figura = generar_grafico_torta(df_gastos["Monto"].tolist(), df_gastos["Concepto"].tolist())
-                st.pyplot(figura)
-            else:
-                st.info("Agrega montos mayores a 0 en tus gastos para ver el gráfico de distribución.")
+    else:
+        st.warning("No hay transacciones para archivar.")
 
-    # --- PANTALLA 2: CONFIGURACIÓN DE CONCEPTOS ---
-    elif opcion == "Añadir / Eliminar Ítems":
-        st.header("⚙️ Administrar Conceptos Financieros")
-        
-        st.subheader("Agregar nuevo concepto")
-        nuevo_item = st.text_input("Nombre del concepto (Ej: Arriendo, Supermercado, Sueldo):")
-        tipo_item = st.selectbox("Tipo de flujo:", ["Gasto", "Ingreso"])
-        
-        if st.button("Guardar concepto"):
-            if nuevo_item.strip():
-                if insertar_nuevo_item_db(st.session_state["hogar_id"], nuevo_item.strip(), tipo_item):
-                    st.success(f"'{nuevo_item}' agregado correctamente.")
-                    st.rerun()
-                else:
-                    st.error("Este concepto ya está registrado.")
-            else:
-                st.warning("El nombre no puede estar vacío.")
-                
-        st.markdown("---")
-        st.subheader("Eliminar conceptos existentes")
-        saldos_actuales = obtener_todos_los_saldos(st.session_state["hogar_id"])
-        
-        if saldos_actuales:
-            for item, monto, tipo in saldos_actuales:
-                col_txt, col_btn = st.columns(2)
-                col_txt.write(f"**{item}** — {tipo}")
-                if col_btn.button("❌", key=f"del_{item}_{tipo}"):
-                    eliminar_item_db(st.session_state["hogar_id"], item, tipo)
-                    st.rerun()
-        else:
-            st.info("No hay conceptos creados.")
+st.subheader("📁 Periodos Consolidados")
+meses_hist = obtener_meses_historicos()
+mes_hist_sel = st.selectbox("Selecciona un mes para auditar:", ["Seleccione..."] + [m for m in meses_hist])
 
-    # --- PANTALLA 3: METAS DE AHORRO ---
-    elif opcion == "Metas de Ahorro":
-        st.header("🎯 Metas de Ahorro")
-        
-        with st.expander("➕ Crear Nueva Meta"):
-            nombre_meta = st.text_input("¿Para qué estás ahorrando?")
-            objetivo_meta = st.number_input("Monto Objetivo ($):", min_value=1.0, step=50.0)
-            plazo_meta = st.number_input("Plazo estimado (en días):", min_value=1, step=30)
-            
-            if st.button("Crear Meta"):
-                if nombre_meta.strip():
-                    insertar_meta_db(st.session_state["hogar_id"], nombre_meta.strip(), objetivo_meta, plazo_meta)
-                    st.success("¡Meta creada con éxito!")
-                    st.rerun()
-                else:
-                    st.error("Por favor, introduce un nombre para la meta.")
-                    
-        df_metas = obtener_metas_db(st.session_state["hogar_id"])
-        if df_metas.empty:
-            st.info("Aún no tienes metas definidas.")
-        else:
-            for _, fila in df_metas.iterrows():
-                st.subheader(f"🏆 {fila['nombre']}")
-                progreso = fila['monto_actual'] / fila['monto_objetivo']
-                st.progress(min(progreso, 1.0))
-                st.write(f"Ahorrado: **${fila['monto_actual']:.2f}** de **${fila['monto_objetivo']:.2f}**")
-                
-                monto_aporte = st.number_input(f"Abonar a '{fila['nombre']}':", min_value=0.0, step=10.0, key=f"aporte_{fila['id']}")
-                if monto_aporte > 0:
-                    if st.button(f"Abonar ${monto_aporte}", key=f"btn_ap_{fila['id']}"):
-                        abonar_a_meta_db(fila['id'], monto_aporte)
-                        st.success("¡Aporte registrado!")
-                        st.rerun()
+if mes_hist_sel != "Seleccione...":
+    conn = sqlite3.connect(RUTA_DB)
+    df_resumen = pd.read_sql_query("SELECT item as 'Concepto', monto as 'Monto' FROM historico WHERE mes_ano = ?", conn, params=(mes_hist_sel,))
+    conn.close()
+    df_resumen['Monto'] = df_resumen['Monto'].apply(formatear_clp)
+    st.dataframe(df_resumen, use_container_width=True)
